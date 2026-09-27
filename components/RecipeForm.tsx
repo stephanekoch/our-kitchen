@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { shrinkPhoto } from "@/lib/client/image";
 import { useKnown } from "@/lib/client/known";
@@ -7,7 +8,6 @@ import type { Draft } from "@/lib/client/types";
 import { Icon } from "./Icon";
 import { IngredientEditor } from "./IngredientEditor";
 import { Photo } from "./bits";
-import { TagEditor } from "./TagEditor";
 
 export const FORM_ID = "recipe-form";
 
@@ -22,7 +22,7 @@ type FormState = {
   easy: boolean;
   quick: boolean;
   freezes_well: boolean;
-  tags: string[];
+  tagIds: string[];
 };
 
 function toState(d: Draft & { quick?: boolean }): FormState {
@@ -37,7 +37,7 @@ function toState(d: Draft & { quick?: boolean }): FormState {
     easy: d.easy,
     quick: d.quick ?? false,
     freezes_well: d.freezes_well,
-    tags: d.tags ?? [],
+    tagIds: d.tag_ids ?? [],
   };
 }
 
@@ -129,7 +129,8 @@ export function RecipeForm({
           easy: s.easy,
           quick: s.quick,
           freezes_well: s.freezes_well,
-          tags: s.tags,
+          tags: [],
+          tag_ids: s.tagIds,
           notes: s.notes.trim() || null,
         },
         photo?.blob ?? null,
@@ -196,8 +197,31 @@ export function RecipeForm({
           </div>
         </div>
         <div className="field">
-          Tags <span className="hint">Your own labels, e.g. weeknight, batch cook, Sunday lunch</span>
-          <TagEditor value={s.tags} onChange={(t) => set("tags", t)} known={known.tags} />
+          <span className="spread">
+            Tags
+            <Link href="/settings/tags" className="small" style={{ fontWeight: 700 }}>Manage</Link>
+          </span>
+          {known.categories.filter((c) => c.options.length).length === 0 ? (
+            <span className="hint">No tags yet. Create categories like Type or Ingredients in Settings → Tags.</span>
+          ) : (
+            known.categories
+              .filter((c) => c.options.length)
+              .map((c) => (
+                <div key={c.id} className="stack" style={{ gap: 6, marginTop: 4 }}>
+                  <span className="small" style={{ fontWeight: 700, color: "var(--muted)" }}>{c.name}</span>
+                  <div className="row wrap" style={{ gap: 6 }}>
+                    {c.options.map((o) => {
+                      const on = s.tagIds.includes(o.id);
+                      return (
+                        <button key={o.id} type="button" className="chip" aria-pressed={on} onClick={() => set("tagIds", on ? s.tagIds.filter((x) => x !== o.id) : [...s.tagIds, o.id])}>
+                          {o.name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))
+          )}
         </div>
       </div>
 

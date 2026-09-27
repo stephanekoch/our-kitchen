@@ -5,6 +5,7 @@ import { dbError, handle, HttpError, ok, readJson } from "@/lib/http";
 import { removePhoto, signPhotos } from "@/lib/photos";
 import { RecipeInput, rowToInput, uuid, type RecipeRow } from "@/lib/recipe-schema";
 import { formatQuantity } from "@/lib/shopping";
+import { setRecipeTags } from "@/lib/tags";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -17,7 +18,7 @@ async function recipeId(params: Params["params"]) {
 async function loadRecipe({ supabase, householdId }: Ctx, id: string): Promise<RecipeRow> {
   const { data, error } = await supabase
     .from("recipes")
-    .select("*, recipe_ingredients(*)")
+    .select("*, recipe_ingredients(*), recipe_tags(option_id)")
     .eq("id", id)
     .eq("household_id", householdId)
     .order("position", { referencedTable: "recipe_ingredients" })
@@ -37,11 +38,13 @@ export const GET = handle(async (_request: Request, { params }: Params) => {
     amount: formatQuantity(i.quantity, i.unit),
   }));
   const signed = await signPhotos(ctx.supabase, [recipe.photo_path]);
-  const { recipe_ingredients: _omit, ...rest } = recipe;
+  const { recipe_ingredients: _omit, recipe_tags, ...rest } = recipe;
 
   return ok({
     recipe: {
       ...rest,
+      tags: [],
+      tag_ids: (recipe_tags ?? []).map((t) => t.option_id),
       ingredients,
       photo_url: recipe.photo_path ? (signed.get(recipe.photo_path) ?? null) : null,
     },
@@ -76,6 +79,7 @@ export const PATCH = handle(async (request: Request, { params }: Params) => {
     p_id: id,
   });
   if (error) throw dbError(error);
+  await setRecipeTags(ctx, id, parsed.tagIds);
 
   if (existing.photo_path && existing.photo_path !== recipe.photo_path) {
     await removePhoto(ctx.supabase, existing.photo_path);

@@ -6,6 +6,7 @@ import { Spinner } from "@/components/bits";
 import { Icon } from "@/components/Icon";
 import { Screen } from "@/components/Screen";
 import { Sheet } from "@/components/Sheet";
+import { useConfirm } from "@/components/Confirm";
 import { CATEGORY_LABELS, categorise, categoryRank, type Category } from "@/lib/categories";
 import { parseIngredientLine } from "@/lib/ingredients";
 import { api, ApiError } from "@/lib/client/api";
@@ -22,6 +23,17 @@ export default function ListPage() {
   const [newItem, setNewItem] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [editMode, setEditMode] = useState(false);
+  const [mode, setModeState] = useState<"shop" | "plan">("shop");
+  const confirm = useConfirm();
+  useEffect(() => {
+    const m = readCache<"shop" | "plan">("listMode");
+    if (m) setModeState(m);
+  }, []);
+  const setMode = (m: "shop" | "plan") => {
+    setModeState(m);
+    writeCache("listMode", m);
+    setEditMode(false);
+  };
   const [editing, setEditing] = useState<ListItem | null>(null);
   const [editText, setEditText] = useState("");
   const [portionEdits, setPortionEdits] = useState<Record<string, number>>({});
@@ -48,30 +60,50 @@ export default function ListPage() {
   };
 
   // Send any ticks made while offline; keep them if there's still no signal.
+  // Apply a saved tick to the list on screen (and its offline copy), so it doesn't flip back.
+  const applyTick = (itemId: string, checked: boolean) =>
+    setList((prev) => {
+      if (!prev) return prev;
+      const mark = (i: ListItem) => (i.id === itemId ? { ...i, checked } : i);
+      const next = { ...prev, groups: prev.groups.map((g) => ({ ...g, items: g.items.map(mark) })), checked: prev.checked.map(mark) };
+      writeCache("list", next);
+      return next;
+    });
+
   const flush = useCallback(async () => {
     if (flushing.current) return;
-    const entries = Object.entries(pendingRef.current);
-    if (!entries.length) return;
     const listId = readCache<ShoppingList>("list")?.id;
     if (!listId) return;
     flushing.current = true;
-    for (const [itemId, checked] of entries) {
-      try {
-        await api(`/api/shopping-lists/${listId}/items/${itemId}`, { method: "PATCH", json: { checked } });
-        const rest = { ...pendingRef.current };
-        if (rest[itemId] === checked) delete rest[itemId];
-        savePending(rest);
-      } catch (e) {
-        if (e instanceof ApiError && e.status === 0) {
-          setOffline(true);
-          break;
+    try {
+      // Keep going until nothing is waiting: ticks made while saving are sent too.
+      for (let entries = Object.entries(pendingRef.current); entries.length; entries = Object.entries(pendingRef.current)) {
+        let stop = false;
+        for (const [itemId, checked] of entries) {
+          try {
+            await api(`/api/shopping-lists/${listId}/items/${itemId}`, { method: "PATCH", json: { checked } });
+            applyTick(itemId, checked);
+            const rest = { ...pendingRef.current };
+            if (rest[itemId] === checked) delete rest[itemId];
+            savePending(rest);
+          } catch (e) {
+            if (e instanceof ApiError && e.status === 0) {
+              setOffline(true);
+              stop = true;
+              break;
+            }
+            if (!(e instanceof ApiError && e.status === 404)) setMessage((e as Error).message);
+            const rest = { ...pendingRef.current };
+            delete rest[itemId];
+            savePending(rest);
+          }
         }
-        const rest = { ...pendingRef.current }; // item was deleted on the other phone, etc.
-        delete rest[itemId];
-        savePending(rest);
+        if (stop) break;
+        setOffline(false);
       }
+    } finally {
+      flushing.current = false;
     }
-    flushing.current = false;
   }, []);
 
   useEffect(() => {
@@ -130,7 +162,7 @@ export default function ListPage() {
       .map(([category, its]) => ({
         category,
         label: CATEGORY_LABELS[category as Category] ?? "Other",
-        items: its.sort((a, b) => Number(a.checked) - Number(b.checked) || a.name.localeCompare(b.name, "en-GB")),
+        items: its.sort((a, b) => a.name.localeCompare(b.name, "en-GB")), // ticking never moves an item
       }));
   }, [items]);
 
@@ -186,7 +218,9 @@ export default function ListPage() {
   }
 
   async function removeRecipe(recipeId: string, title: string) {
-    if (!list || !confirm(`Take “${title}” off the list? Items only it needed are removed too.`)) return;
+    if (!list) return;
+    const ok = await confirm({ title: `Take ${title} off the list?`, body: "Items only this recipe needed come off too.", confirmLabel: "Remove recipe", danger: true, icon: "trash" });
+    if (!ok) return;
     try {
       const res = await api<{ list: ShoppingList | null }>(`/api/shopping-lists/${list.id}/recipes/${recipeId}`, { method: "DELETE" });
       setList(res.list);
@@ -235,7 +269,17 @@ export default function ListPage() {
 
   async function clear(all: boolean) {
     if (!list) return;
-    if (all && !confirm("Empty the whole list?")) return;
+    if (all) {
+      const ok = await confirm({
+        title: "Empty the list?",
+        body: `All ${items.length} item${items.length === 1 ? "" : "s"}${list.recipes.length ? ` and ${list.recipes.length === 1 ? "the recipe" : `all ${list.recipes.length} recipes`}` : ""} come off the list. Your recipes stay saved.`,
+        confirmLabel: "Empty list",
+        cancelLabel: "Keep it",
+        danger: true,
+        icon: "trash",
+      });
+      if (!ok) return;
+    }
     try {
       await api(`/api/shopping-lists/${list.id}/items?${all ? "all" : "checked"}=true`, { method: "DELETE" });
       await load();
@@ -246,33 +290,47 @@ export default function ListPage() {
 
   const subtitle = list === undefined ? "" : items.length ? `${ticked} of ${items.length} ticked` : "Nothing on the list yet";
 
+  const ownItems = items.filter((i) => i.is_manual);
+  const itemRow = (i: ListItem) => {
+    const from = i.is_manual ? "" : i.source_recipe_ids.map((id) => recipeTitles.get(id)).filter(Boolean).join(", ");
+    return (
+      <li key={i.id}>
+        <button
+          type="button"
+          className="item"
+          aria-pressed={editMode ? undefined : i.checked}
+          aria-label={editMode ? `Change ${i.name}` : undefined}
+          onClick={() => (editMode ? openEdit(i) : toggle(i))}
+        >
+          {editMode ? (
+            <span className="box" style={{ border: 0, color: "var(--primary)" }}>
+              <Icon name="pencil" size={20} />
+            </span>
+          ) : (
+            <span className="box">{i.checked && <Icon name="check" size={18} stroke={3} />}</span>
+          )}
+          <span className="name">
+            <b>{i.name}</b>
+            {from && <small>{from}</small>}
+          </span>
+          <span className="qty">{i.amount}</span>
+        </button>
+      </li>
+    );
+  };
+
   return (
     <Screen
       title="Shopping list"
       subtitle={subtitle}
       right={
-        items.length > 0 ? (
+        mode === "shop" && items.length > 0 ? (
           <button type="button" className="btn btn-quiet" aria-pressed={editMode} onClick={() => setEditMode(!editMode)}>
             {editMode ? "Done" : "Edit"}
           </button>
         ) : undefined
       }
-      dockHeight={170}
-      dock={
-        <form
-          className="add-row"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void addItem();
-          }}
-        >
-          <label className="sr-only" htmlFor="new-item">Add something else</label>
-          <input id="new-item" className="input" value={newItem} onChange={(e) => setNewItem(e.target.value)} placeholder="Add something else, e.g. 2 lemons" enterKeyHint="done" autoComplete="off" />
-          <button type="submit" aria-label="Add to list" disabled={!newItem.trim()}>
-            <Icon name="plus" size={24} stroke={2.6} />
-          </button>
-        </form>
-      }
+      dockHeight={100}
     >
       {items.length > 0 && (
         <div className="progress" aria-hidden="true">
@@ -281,94 +339,101 @@ export default function ListPage() {
       )}
       {offline && <p className="offline">No signal — showing the last copy. Ticks save when you&apos;re back online.</p>}
       <main className="screen-body" style={{ paddingTop: 8 }}>
+        <div className="seg seg-2" role="tablist" aria-label="Shopping list view">
+          <button type="button" role="tab" aria-selected={mode === "shop"} aria-pressed={mode === "shop"} onClick={() => setMode("shop")}>
+            Shop
+          </button>
+          <button type="button" role="tab" aria-selected={mode === "plan"} aria-pressed={mode === "plan"} onClick={() => setMode("plan")}>
+            Plan
+          </button>
+        </div>
         {list === undefined && <Spinner label="Loading the list…" />}
         {message && <p className="error" role="alert">{message}</p>}
-        {list !== undefined && items.length === 0 && (
-          <div className="card empty">
-            <Icon name="list" size={40} />
-            <h2>Nothing to buy</h2>
-            <p>Open a recipe and tap “Add to shopping list”, or type something below.</p>
-            <Link href="/" className="btn btn-secondary">
-              <Icon name="book" /> Recipes
-            </Link>
-          </div>
+
+        {mode === "shop" && (
+          <>
+            {list !== undefined && items.length === 0 && (
+              <div className="card empty">
+                <Icon name="list" size={40} />
+                <h2>Nothing to buy</h2>
+                <p>Open a recipe and tap “Add to list”, or add your own items in Plan.</p>
+                <button type="button" className="btn btn-secondary" onClick={() => setMode("plan")}>
+                  Go to Plan
+                </button>
+              </div>
+            )}
+            <div className="shop stack" style={{ gap: 12 }}>
+              {groups.map((g) => (
+                <section key={g.category} className="aisle">
+                  <h2>{g.label}</h2>
+                  <ul>{g.items.map(itemRow)}</ul>
+                </section>
+              ))}
+            </div>
+            {items.length > 0 && (
+              <div className="spread" style={{ marginTop: 4 }}>
+                <button type="button" className="btn btn-secondary" style={{ minHeight: 44 }} onClick={() => clear(false)} disabled={!ticked}>
+                  <Icon name="check" size={18} /> Clear ticked ({ticked})
+                </button>
+                <button type="button" className="btn btn-quiet" onClick={() => clear(true)}>
+                  Empty list
+                </button>
+              </div>
+            )}
+          </>
         )}
-        {list && list.recipes.length > 0 && (
-          <details className="card list-recipes">
-            <summary>
-              <span>
-                For: {list.recipes.map((r) => `${r.title} (${portionEdits[r.id] ?? r.servings ?? "?"})`).join(" · ")}
-              </span>
-              <span className="summary-action">Change</span>
-            </summary>
-            <ul>
-              {list.recipes.map((r) => {
-                const n = portionEdits[r.id] ?? r.servings ?? 1;
-                return (
-                  <li key={r.id}>
-                    <Link href={`/recipes/${r.id}`} className="list-recipe-title">{r.title}</Link>
-                    <div className="stepper">
-                      <button type="button" aria-label={`Fewer portions of ${r.title}`} disabled={n <= 1} onClick={() => changePortions(r.id, n, -1)}>
-                        <Icon name="minus" stroke={2.4} />
-                      </button>
-                      <span aria-live="polite" style={{ minWidth: 34 }}>{n}</span>
-                      <button type="button" aria-label={`More portions of ${r.title}`} disabled={n >= 50} onClick={() => changePortions(r.id, n, 1)}>
-                        <Icon name="plus" stroke={2.4} />
-                      </button>
-                    </div>
-                    <button type="button" className="icon-btn" style={{ background: "transparent" }} aria-label={`Remove ${r.title} from the list`} onClick={() => removeRecipe(r.id, r.title)}>
-                      <Icon name="trash" size={20} />
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-            <p className="small muted" style={{ margin: "6px 0 0" }}>Numbers are portions. Amounts on the list update to match.</p>
-          </details>
-        )}
-        {groups.map((g) => (
-          <section key={g.category} className="aisle">
-            <h2>{g.label}</h2>
-            <ul>
-              {g.items.map((i) => {
-                const from = i.is_manual ? "" : i.source_recipe_ids.map((id) => recipeTitles.get(id)).filter(Boolean).join(", ");
-                return (
-                  <li key={i.id}>
-                    <button
-                      type="button"
-                      className="item"
-                      aria-pressed={editMode ? undefined : i.checked}
-                      aria-label={editMode ? `Change ${i.name}` : undefined}
-                      onClick={() => (editMode ? openEdit(i) : toggle(i))}
-                    >
-                      {editMode ? (
-                        <span className="box" style={{ border: 0, color: "var(--primary)" }}>
-                          <Icon name="pencil" size={20} />
-                        </span>
-                      ) : (
-                        <span className="box">{i.checked && <Icon name="check" size={18} stroke={3} />}</span>
-                      )}
-                      <span className="name">
-                        <b>{i.name}</b>
-                        {from && <small>{from}</small>}
-                      </span>
-                      <span className="qty">{i.amount}</span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          </section>
-        ))}
-        {items.length > 0 && (
-          <div className="spread" style={{ marginTop: 4 }}>
-            <button type="button" className="btn btn-secondary" style={{ minHeight: 44 }} onClick={() => clear(false)} disabled={!ticked}>
-              <Icon name="check" size={18} /> Clear ticked ({ticked})
-            </button>
-            <button type="button" className="btn btn-quiet" onClick={() => clear(true)}>
-              Empty list
-            </button>
-          </div>
+
+        {mode === "plan" && list !== undefined && (
+          <>
+            <section className="card">
+              <h2>Cooking for</h2>
+              {!list?.recipes.length ? (
+                <p className="muted" style={{ margin: 0 }}>No recipes yet. Open a recipe and tap “Add to list”.</p>
+              ) : (
+                <ul className="plan-recipes">
+                  {list.recipes.map((r) => {
+                    const n = portionEdits[r.id] ?? r.servings ?? 1;
+                    return (
+                      <li key={r.id}>
+                        <Link href={`/recipes/${r.id}`} className="list-recipe-title">{r.title}</Link>
+                        <div className="stepper">
+                          <button type="button" aria-label={`Fewer portions of ${r.title}`} disabled={n <= 1} onClick={() => changePortions(r.id, n, -1)}>
+                            <Icon name="minus" stroke={2.4} />
+                          </button>
+                          <span aria-live="polite" style={{ minWidth: 30 }}>{n}</span>
+                          <button type="button" aria-label={`More portions of ${r.title}`} disabled={n >= 50} onClick={() => changePortions(r.id, n, 1)}>
+                            <Icon name="plus" stroke={2.4} />
+                          </button>
+                        </div>
+                        <button type="button" className="icon-btn" style={{ background: "transparent" }} aria-label={`Remove ${r.title} from the list`} onClick={() => removeRecipe(r.id, r.title)}>
+                          <Icon name="trash" size={20} />
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+              {!!list?.recipes.length && <p className="small muted" style={{ margin: "8px 0 0" }}>Numbers are portions. The list updates to match.</p>}
+            </section>
+            <section className="aisle">
+              <h2>Your own items</h2>
+              {ownItems.length > 0 && <ul>{ownItems.map((i) => itemRow(i))}</ul>}
+              <form
+                className="add-row"
+                style={{ padding: "8px 16px 14px" }}
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void addItem();
+                }}
+              >
+                <label className="sr-only" htmlFor="new-item">Add something else</label>
+                <input id="new-item" className="input" value={newItem} onChange={(e) => setNewItem(e.target.value)} placeholder="Add something, e.g. 2 lemons" enterKeyHint="done" autoComplete="off" />
+                <button type="submit" aria-label="Add to list" disabled={!newItem.trim()}>
+                  <Icon name="plus" size={24} stroke={2.6} />
+                </button>
+              </form>
+            </section>
+          </>
         )}
       </main>
       {editing && (

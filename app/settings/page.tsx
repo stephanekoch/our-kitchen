@@ -39,7 +39,7 @@ export default function Settings() {
       }
     >
       <main className="screen-body">
-        <Row href="/settings/tags" icon="pencil" title="Tags" hint="Rename, merge or delete" />
+        <Row href="/settings/tags" icon="tag" title="Tags" hint="Categories and their options" />
         <Row href="/settings/people" icon="people" title="Add someone" hint="Who's in, and invite someone new" />
         <button type="button" className="btn btn-secondary" style={{ marginTop: 8 }} onClick={signOut}>
           Sign out of this phone

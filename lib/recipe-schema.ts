@@ -49,7 +49,8 @@ export const RecipeInput = z
     easy: z.boolean().default(false),
     quick: z.boolean().default(false),
     freezes_well: z.boolean().default(false),
-    tags: z.array(z.string().trim().min(1).max(40)).max(20).default([]),
+    tags: z.array(z.string().trim().min(1).max(40)).max(20).default([]), // legacy single-level tags, no longer used
+    tag_ids: z.array(z.uuid()).max(60).default([]),
     notes: z.string().trim().max(5000).nullish(),
   })
   .transform((r) => {
@@ -74,10 +75,10 @@ export const RecipeInput = z
       easy: r.easy,
       quick: r.quick,
       freezes_well: r.freezes_well,
-      tags: [...new Set(r.tags.map((t) => t.toLowerCase()))],
+      tags: [] as string[],
       notes: r.notes || null,
     };
-    return { recipe, ingredients };
+    return { recipe, ingredients, tagIds: [...new Set(r.tag_ids)] };
   });
 
 export type RecipeRecord = z.output<typeof RecipeInput>["recipe"];
@@ -99,13 +100,15 @@ export type RecipeRow = Omit<RecipeRecord, "source_type"> & {
   created_at: string;
   updated_at: string;
   recipe_ingredients?: IngredientRow[];
+  recipe_tags?: { option_id: string }[];
 };
 
 /** For PATCH: the stored recipe in the same shape RecipeInput accepts. */
 export function rowToInput(row: RecipeRow): Record<string, unknown> {
-  const { id, household_id, created_at, updated_at, recipe_ingredients, ...rest } = row;
+  const { id, household_id, created_at, updated_at, recipe_ingredients, recipe_tags, ...rest } = row;
   return {
     ...rest,
+    tag_ids: (recipe_tags ?? []).map((t) => t.option_id),
     ingredients: (recipe_ingredients ?? [])
       .slice()
       .sort((a, b) => a.position - b.position)

@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
+import { ConfirmProvider } from "@/components/Confirm";
 import { SwRegister } from "@/components/SwRegister";
 import { APP } from "@/lib/app-config";
 import "./globals.css";
@@ -40,7 +41,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         />
       </head>
       <body>
-        {children}
+        <ConfirmProvider>{children}</ConfirmProvider>
         <SwRegister />
       </body>
     </html>

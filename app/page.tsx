@@ -9,14 +9,14 @@ import { Sheet } from "@/components/Sheet";
 import { api } from "@/lib/client/api";
 import { readCache, writeCache } from "@/lib/client/cache";
 import { duration } from "@/lib/client/format";
-import { recipesOnList } from "@/lib/client/known";
+import { recipesOnList, useKnown } from "@/lib/client/known";
 import type { RecipeSummary, ShoppingList } from "@/lib/client/types";
 
 const FILTERS = [
-  { id: "baby_friendly", label: "Baby" },
-  { id: "easy", label: "Easy" },
-  { id: "quick", label: "Quick" },
-  { id: "freezes_well", label: "Freezes" },
+  { id: "baby_friendly", label: "Baby", long: "Baby-friendly" },
+  { id: "easy", label: "Easy", long: "Easy" },
+  { id: "quick", label: "Quick", long: "Quick" },
+  { id: "freezes_well", label: "Freezes", long: "Freezes well" },
 ] as const;
 type FilterId = (typeof FILTERS)[number]["id"];
 
@@ -27,8 +27,9 @@ export default function Recipes() {
   const [q, setQ] = useState("");
   const [searching, setSearching] = useState(false);
   const [matches, setMatches] = useState<Set<string> | null>(null);
-  const [tags, setTags] = useState<Set<string>>(new Set());
-  const [tagSheet, setTagSheet] = useState(false);
+  const [picked, setPicked] = useState<Record<string, string[]>>({}); // category id → option ids
+  const [sheet, setSheet] = useState<string | null>(null); // category id, or "flags"
+  const { categories } = useKnown();
   const [onList, setOnList] = useState<Map<string, number | null>>(new Map());
   const searchInput = useRef<HTMLInputElement>(null);
 
@@ -72,19 +73,25 @@ export default function Recipes() {
     return () => clearTimeout(t);
   }, [q, all]);
 
+  // Any option within a category; every category you've picked from must match.
   const shown = useMemo(
     () =>
       (all ?? []).filter(
-        (r) => [...on].every((f) => r[f]) && [...tags].every((t) => r.tags.includes(t)) && (!matches || matches.has(r.id)),
+        (r) =>
+          [...on].every((f) => r[f]) &&
+          Object.values(picked).every((ids) => !ids.length || ids.some((id) => (r.tag_ids ?? []).includes(id))) &&
+          (!matches || matches.has(r.id)),
       ),
-    [all, on, tags, matches],
+    [all, on, picked, matches],
   );
-
-  const allTags = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const r of all ?? []) for (const t of r.tags) counts.set(t, (counts.get(t) ?? 0) + 1);
-    return [...counts.entries()].sort((a, b) => a[0].localeCompare(b[0], "en-GB"));
-  }, [all]);
+  const pickedCount = Object.values(picked).reduce((n, ids) => n + ids.length, 0);
+  const usedCategories = categories.filter((c) => c.options.length > 0);
+  const sheetCategory = usedCategories.find((c) => c.id === sheet) ?? null;
+  const toggleOption = (catId: string, optId: string) =>
+    setPicked((p) => {
+      const cur = p[catId] ?? [];
+      return { ...p, [catId]: cur.includes(optId) ? cur.filter((x) => x !== optId) : [...cur, optId] };
+    });
 
   const toggle = (f: FilterId) =>
     setOn((prev) => {
@@ -94,7 +101,7 @@ export default function Recipes() {
       return next;
     });
 
-  const subtitle = all === null ? "" : on.size || tags.size || q ? `${shown.length} of ${all.length} recipes` : `${all.length} recipes`;
+  const subtitle = all === null ? "" : on.size || pickedCount || q ? `${shown.length} of ${all.length} recipes` : `${all.length} recipes`;
 
   return (
     <Screen
@@ -130,23 +137,19 @@ export default function Recipes() {
             <button type="button" className="chip chip-icon" aria-label="Search" aria-pressed={!!q} onClick={() => setSearching(true)}>
               <Icon name="search" size={20} />
             </button>
-            {FILTERS.map((f) => (
-              <button key={f.id} type="button" className="chip" aria-pressed={on.has(f.id)} onClick={() => toggle(f.id)}>
-                {f.label}
-              </button>
-            ))}
-            {allTags.length > 0 && (
-              <button
-                type="button"
-                className="chip chip-icon"
-                aria-pressed={tags.size > 0}
-                aria-haspopup="dialog"
-                aria-label={tags.size ? `Tags, ${tags.size} selected` : "Filter by tag"}
-                onClick={() => setTagSheet(true)}
-              >
-                <Icon name="tag" size={20} />
-              </button>
-            )}
+            {usedCategories.map((c) => {
+              const n = (picked[c.id] ?? []).length;
+              return (
+                <button key={c.id} type="button" className="chip chip-pill" aria-pressed={n > 0} aria-haspopup="dialog" onClick={() => setSheet(c.id)}>
+                  {n ? `${c.name} · ${n}` : c.name}
+                  <Icon name="chevron" size={16} stroke={2.4} />
+                </button>
+              );
+            })}
+            <button type="button" className="chip chip-pill" aria-pressed={on.size > 0} aria-haspopup="dialog" onClick={() => setSheet("flags")}>
+              {on.size ? `Good for · ${on.size}` : "Good for"}
+              <Icon name="chevron" size={16} stroke={2.4} />
+            </button>
           </div>
         )
       }
@@ -192,37 +195,43 @@ export default function Recipes() {
           ))}
         </div>
       </main>
-      {tagSheet && (
-        <Sheet title="Filter by tag" onClose={() => setTagSheet(false)}>
-          <div className="row wrap" style={{ gap: 8 }}>
-            {allTags.map(([t, n]) => (
-              <button
-                key={t}
-                type="button"
-                className="chip"
-                aria-pressed={tags.has(t)}
-                onClick={() =>
-                  setTags((prev) => {
-                    const next = new Set(prev);
-                    if (next.has(t)) next.delete(t);
-                    else next.add(t);
-                    return next;
-                  })
-                }
-              >
-                {t} <span style={{ opacity: 0.6, fontWeight: 400 }}>{n}</span>
-              </button>
-            ))}
+      {sheet && (
+        <Sheet title={sheetCategory ? sheetCategory.name : "Good for"} onClose={() => setSheet(null)}>
+          <p className="small muted" style={{ margin: 0 }}>
+            {sheetCategory ? "Pick as many as you like: recipes matching any of them show." : "Recipes must have every one you pick."}
+          </p>
+          <div>
+            {sheetCategory
+              ? sheetCategory.options.map((o) => {
+                  const on_ = (picked[sheetCategory.id] ?? []).includes(o.id);
+                  return (
+                    <button key={o.id} type="button" className="optrow" aria-pressed={on_} onClick={() => toggleOption(sheetCategory.id, o.id)}>
+                      <span>
+                        {o.name} <small>{o.count}</small>
+                      </span>
+                      <span className="ck">{on_ && <Icon name="check" size={16} stroke={3} />}</span>
+                    </button>
+                  );
+                })
+              : FILTERS.map((f) => (
+                  <button key={f.id} type="button" className="optrow" aria-pressed={on.has(f.id)} onClick={() => toggle(f.id)}>
+                    <span>{f.long}</span>
+                    <span className="ck">{on.has(f.id) && <Icon name="check" size={16} stroke={3} />}</span>
+                  </button>
+                ))}
           </div>
           <div className="spread">
-            <button type="button" className="btn btn-quiet" onClick={() => setTags(new Set())} disabled={!tags.size}>
-              Clear tags
+            <button
+              type="button"
+              className="btn btn-quiet"
+              onClick={() => (sheetCategory ? setPicked((p) => ({ ...p, [sheetCategory.id]: [] })) : setOn(new Set()))}
+            >
+              Clear
             </button>
-            <button type="button" className="btn btn-primary" onClick={() => setTagSheet(false)}>
+            <button type="button" className="btn btn-primary" onClick={() => setSheet(null)}>
               Show {shown.length} recipe{shown.length === 1 ? "" : "s"}
             </button>
           </div>
-          <Link href="/settings/tags" className="small">Rename, merge or delete tags</Link>
         </Sheet>
       )}
     </Screen>

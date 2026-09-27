@@ -11,6 +11,7 @@ export type RecipeSummary = {
   quick: boolean;
   freezes_well: boolean;
   tags: string[];
+  tag_ids: string[];
   image_url: string | null;
   photo_url: string | null;
   source_type: "manual" | "url" | "photo";
@@ -56,6 +57,7 @@ export type Draft = {
   quick?: boolean;
   freezes_well: boolean;
   tags: string[];
+  tag_ids?: string[];
   notes: string | null;
 };
 
@@ -87,3 +89,6 @@ export type ShoppingList = {
   checked: ListItem[];
   counts: { total: number; remaining: number };
 };
+
+export type TagOption = { id: string; name: string; count: number };
+export type TagCategory = { id: string; name: string; options: TagOption[] };

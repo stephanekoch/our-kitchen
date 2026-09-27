@@ -2,20 +2,23 @@
 
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FlagTags, Photo, Spinner } from "@/components/bits";
+import { Celebration, type CookStats } from "@/components/Celebration";
+import { useConfirm } from "@/components/Confirm";
 import { Icon } from "@/components/Icon";
 import { Screen } from "@/components/Screen";
 import { APP } from "@/lib/app-config";
 import { api } from "@/lib/client/api";
 import { readCache, writeCache } from "@/lib/client/cache";
 import { amount, duration } from "@/lib/client/format";
-import { recipesOnList } from "@/lib/client/known";
-import { singularise } from "@/lib/ingredients";
+import { recipesOnList, useKnown } from "@/lib/client/known";
 import type { Recipe, ShoppingList } from "@/lib/client/types";
+import { singularise } from "@/lib/ingredients";
 
 type Loaded = { recipe: Recipe };
 type Cooking = { done: number[]; startedAt: number };
+type Timer = { recipeId: string; label: string; endAt: number };
 const COOK_EXPIRY_MS = 12 * 60 * 60 * 1000; // a cooking session left open is forgotten after 12 hours
 
 /** "carrots" → "carrot" when you only need one (or less). */
@@ -25,19 +28,60 @@ function oneOf(name: string): string {
   return words.join(" ");
 }
 
+/** Minutes mentioned in a step: "simmer for 15–20 minutes" → 20, "bake 1 hour" → 60. */
+function minutesIn(step: string): number | null {
+  const m = step.match(/(\d+)(?:\s*(?:-|–|to)\s*(\d+))?\s*(minutes?|mins?|hours?|hrs?)\b/i);
+  if (!m) return null;
+  const n = Number(m[2] ?? m[1]);
+  const mins = /^h/i.test(m[3]!) ? n * 60 : n;
+  return mins > 0 && mins <= 600 ? mins : null;
+}
+
+const clock = (ms: number) => {
+  const s = Math.max(0, Math.ceil(ms / 1000));
+  const h = Math.floor(s / 3600);
+  const mm = String(Math.floor((s % 3600) / 60)).padStart(h ? 2 : 1, "0");
+  const ss = String(s % 60).padStart(2, "0");
+  return h ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
+};
+
+function beep() {
+  try {
+    const Ctx = window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    const ctx = new Ctx();
+    [0, 0.35, 0.7].forEach((t) => {
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.frequency.value = 880;
+      g.gain.setValueAtTime(0.25, ctx.currentTime + t);
+      g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + t + 0.3);
+      o.connect(g).connect(ctx.destination);
+      o.start(ctx.currentTime + t);
+      o.stop(ctx.currentTime + t + 0.3);
+    });
+  } catch {}
+  navigator.vibrate?.([300, 150, 300, 150, 300]);
+}
+
 type WakeLockNav = Navigator & { wakeLock?: { request: (t: "screen") => Promise<{ release: () => Promise<void> }> } };
 
 export default function RecipePage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
+  const confirm = useConfirm();
+  const { categories } = useKnown();
   const [data, setData] = useState<Loaded | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [portions, setPortions] = useState<number>(APP.defaultPortions);
   const [onList, setOnList] = useState<Map<string, number | null>>(new Map());
   const [cooking, setCooking] = useState<Cooking | null>(null);
+  const [timer, setTimer] = useState<Timer | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  const [celebrate, setCelebrate] = useState<{ stats: CookStats | null } | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const method = useRef<HTMLElement>(null);
+  const rang = useRef(false);
   const cookKey = `cook:${id}`;
 
   useEffect(() => {
@@ -72,6 +116,8 @@ export default function RecipePage() {
 
     const saved = readCache<Cooking>(cookKey);
     if (saved && Date.now() - saved.startedAt < COOK_EXPIRY_MS) setCooking(saved);
+    const t = readCache<Timer>("timer");
+    if (t && t.recipeId === id && t.endAt > Date.now() - 60_000) setTimer(t);
   }, [id, cookKey]);
 
   // While cooking, the phone screen stays on (no dimming or locking with messy hands).
@@ -98,6 +144,21 @@ export default function RecipePage() {
     };
   }, [cooking !== null]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Timer: tick every second, ring once when it's up.
+  useEffect(() => {
+    if (!timer) return;
+    rang.current = timer.endAt <= Date.now();
+    const i = setInterval(() => {
+      const t = Date.now();
+      setNow(t);
+      if (!rang.current && t >= timer.endAt) {
+        rang.current = true;
+        beep();
+      }
+    }, 1000);
+    return () => clearInterval(i);
+  }, [timer]);
+
   const saveCooking = useCallback(
     (c: Cooking | null) => {
       setCooking(c);
@@ -105,6 +166,16 @@ export default function RecipePage() {
     },
     [cookKey],
   );
+  const saveTimer = (t: Timer | null) => {
+    setTimer(t);
+    setNow(Date.now());
+    writeCache("timer", t);
+  };
+
+  const catTags = useMemo(() => {
+    const ids = new Set(data?.recipe.tag_ids ?? []);
+    return categories.flatMap((c) => c.options.filter((o) => ids.has(o.id)).map((o) => ({ id: o.id, cat: c.name, name: o.name })));
+  }, [categories, data]);
 
   if (!data) {
     return (
@@ -127,6 +198,7 @@ export default function RecipePage() {
   const doneSet = new Set(cooking?.done ?? []);
   const current = cooking ? steps.findIndex((_, n) => !doneSet.has(n)) : -1;
   const allDone = cooking !== null && steps.length > 0 && current === -1;
+  const timerLeft = timer ? timer.endAt - now : 0;
 
   async function listAction() {
     setBusy("list");
@@ -159,25 +231,48 @@ export default function RecipePage() {
     setTimeout(() => method.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
   }
 
-  function stopCooking() {
-    if (!allDone && (cooking?.done.length ?? 0) > 0 && !confirm("Stop cooking? Your ticked steps will be cleared.")) return;
+  async function stopCooking() {
+    if ((cooking?.done.length ?? 0) > 0 && !allDone) {
+      const ok = await confirm({ title: "Stop cooking?", body: "Your ticked steps will be cleared.", confirmLabel: "Stop cooking", cancelLabel: "Keep cooking", icon: "stop" });
+      if (!ok) return;
+    }
     saveCooking(null);
-    if (allDone) setToast("Enjoy your meal!");
+    saveTimer(null);
+  }
+
+  function finish() {
+    setCelebrate({ stats: null });
+    api<CookStats>(`/api/recipes/${r.id}/cooked`, { method: "POST" })
+      .then((stats) => setCelebrate((c) => (c ? { stats } : c)))
+      .catch(() => {});
   }
 
   function toggleStep(n: number) {
     if (!cooking) return;
-    const next = doneSet.has(n) ? cooking.done.filter((x) => x !== n) : [...cooking.done, n];
+    const wasDone = doneSet.has(n);
+    const next = wasDone ? cooking.done.filter((x) => x !== n) : [...cooking.done, n];
     saveCooking({ ...cooking, done: next });
-    // Bring the next step into view.
+    if (!wasDone && next.length === steps.length) {
+      finish();
+      return;
+    }
     const following = steps.findIndex((_, i) => !next.includes(i));
-    if (following >= 0 && !doneSet.has(n)) {
+    if (following >= 0 && !wasDone) {
       setTimeout(() => document.getElementById(`step-${following}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 80);
     }
   }
 
+  async function startTimer(mins: number, stepNo: number) {
+    if (timer && timer.endAt > Date.now()) {
+      const ok = await confirm({ title: "Replace the running timer?", body: `${timer.label} has ${clock(timer.endAt - Date.now())} left.`, confirmLabel: "Start new timer", icon: "timer" });
+      if (!ok) return;
+    }
+    saveTimer({ recipeId: r.id, label: `Step ${stepNo} · ${mins} min`, endAt: Date.now() + mins * 60_000 });
+  }
+
   async function remove() {
-    if (!confirm(`Delete “${r.title}”? This can't be undone.`)) return;
+    const ok = await confirm({ title: `Delete “${r.title}”?`, body: "The recipe and its photo are deleted for both of you. This can't be undone.", confirmLabel: "Delete recipe", danger: true, icon: "trash" });
+    if (!ok) return;
     setBusy("delete");
     try {
       await api(`/api/recipes/${r.id}`, { method: "DELETE" });
@@ -197,14 +292,20 @@ export default function RecipePage() {
       dockHeight={90}
       dock={
         <div className="row">
-          <button type="button" className={`btn ${listed ? "btn-secondary" : "btn-secondary"}`} style={{ flex: 1, paddingInline: 10 }} onClick={listAction} disabled={busy === "list"}>
+          <button type="button" className="btn btn-secondary" style={{ flex: 1, paddingInline: 10 }} onClick={listAction} disabled={busy === "list"}>
             <Icon name={listed ? "x" : "cart"} size={20} />
             {busy === "list" ? "…" : listed ? "Remove from list" : "Add to list"}
           </button>
           {cooking ? (
-            <button type="button" className={`btn ${allDone ? "btn-primary" : "btn-dark"}`} style={{ flex: 1 }} onClick={stopCooking} aria-label={allDone ? "Finish cooking" : "Stop cooking"}>
-              <Icon name={allDone ? "check" : "stop"} size={20} /> {allDone ? "Finish" : "Stop"}
-            </button>
+            allDone ? (
+              <button type="button" className="btn btn-primary" style={{ flex: 1 }} onClick={finish}>
+                <Icon name="check" size={20} /> Finish
+              </button>
+            ) : (
+              <button type="button" className="btn btn-dark" style={{ flex: 1 }} onClick={stopCooking} aria-label="Stop cooking">
+                <Icon name="stop" size={20} /> Stop
+              </button>
+            )
           ) : (
             <button type="button" className="btn btn-primary" style={{ flex: 1 }} onClick={startCooking} disabled={!steps.length}>
               <Icon name="play" size={20} /> Cook
@@ -213,24 +314,42 @@ export default function RecipePage() {
         </div>
       }
     >
-      <div style={{ position: "relative" }}>
+      {/* The photo stays put; the recipe slides up over it. */}
+      <div className="hero-fixed">
         <Photo src={r.photo_url ?? r.image_url} className="hero" iconSize={76} />
-        <div className="hero-bar">
-          <Link href="/" className="icon-btn on-photo" aria-label="Back to recipes">
-            <Icon name="back" stroke={2.4} />
+      </div>
+      <div className="hero-bar-fixed">
+        <Link href="/" className="icon-btn on-photo" aria-label="Back to recipes">
+          <Icon name="back" stroke={2.4} />
+        </Link>
+        <div className="row" style={{ gap: 8 }}>
+          <Link href={`/recipes/${r.id}/edit`} className="icon-btn on-photo" aria-label="Edit recipe and photo">
+            <Icon name="pencil" />
           </Link>
-          <div className="row" style={{ gap: 8 }}>
-            <Link href={`/recipes/${r.id}/edit`} className="icon-btn on-photo" aria-label="Edit recipe and photo">
-              <Icon name="pencil" />
-            </Link>
-            <button type="button" className="icon-btn on-photo" aria-label="Delete recipe" onClick={remove} disabled={busy === "delete"}>
-              <Icon name="trash" />
-            </button>
-          </div>
+          <button type="button" className="icon-btn on-photo" aria-label="Delete recipe" onClick={remove} disabled={busy === "delete"}>
+            <Icon name="trash" />
+          </button>
         </div>
       </div>
+      {timer && (
+        <div className={`timer-banner${timerLeft <= 0 ? " timer-up" : ""}`} role="status" aria-live="polite">
+          <span className="row" style={{ gap: 8 }}>
+            <span className="pulse" aria-hidden="true" />
+            {timerLeft > 0 ? (
+              <>
+                <b style={{ fontVariantNumeric: "tabular-nums" }}>{clock(timerLeft)}</b> <span>{timer.label}</span>
+              </>
+            ) : (
+              <b>Time&apos;s up · {timer.label}</b>
+            )}
+          </span>
+          <button type="button" className="btn btn-quiet" style={{ color: "#fff", minHeight: 36 }} onClick={() => saveTimer(null)}>
+            {timerLeft > 0 ? "Cancel" : "OK"}
+          </button>
+        </div>
+      )}
 
-      <main className="screen-body" style={{ paddingTop: 16 }}>
+      <main className="screen-body over-photo">
         <h1 className="recipe-title">{r.title}</h1>
         <div className="recipe-meta" style={{ marginTop: 0 }}>
           {r.total_minutes != null && (
@@ -245,10 +364,12 @@ export default function RecipePage() {
             </Link>
           )}
         </div>
-        {r.tags.length > 0 && (
+        {catTags.length > 0 && (
           <div className="row wrap" style={{ gap: 6 }}>
-            {r.tags.map((t) => (
-              <span key={t} className="tag-chip">{t}</span>
+            {catTags.map((t) => (
+              <span key={t.id} className="tag tag-cat">
+                {t.cat} · {t.name}
+              </span>
             ))}
           </div>
         )}
@@ -289,7 +410,7 @@ export default function RecipePage() {
         </section>
 
         {steps.length > 0 && (
-          <section className={`card${cooking ? " cooking" : ""}`} ref={method} style={{ scrollMarginTop: 16 }}>
+          <section className={`card${cooking ? " cooking" : ""}`} ref={method} style={{ scrollMarginTop: 80 }}>
             <div className="spread" style={{ marginBottom: 6 }}>
               <h2 style={{ margin: 0 }}>Method</h2>
               {cooking && (
@@ -298,21 +419,40 @@ export default function RecipePage() {
                 </span>
               )}
             </div>
-            {cooking && !allDone && cooking.done.length === 0 && (
+            {cooking && cooking.done.length === 0 && (
               <p className="small muted" style={{ margin: "0 0 8px" }}>
-                Tap each step when it&apos;s done. The screen stays on while you cook.
+                Tap <b>Done</b> as you finish each step. The screen stays on while you cook.
               </p>
             )}
             {cooking ? (
               <ol className="cook-steps">
-                {steps.map((step, n) => (
-                  <li key={n} id={`step-${n}`}>
-                    <button type="button" aria-pressed={doneSet.has(n)} className={n === current ? "current" : undefined} onClick={() => toggleStep(n)}>
-                      <span className="step-box">{doneSet.has(n) ? <Icon name="check" size={18} stroke={3} /> : n + 1}</span>
-                      <span>{step}</span>
-                    </button>
-                  </li>
-                ))}
+                {steps.map((step, n) => {
+                  const done = doneSet.has(n);
+                  const mins = minutesIn(step);
+                  return (
+                    <li key={n} id={`step-${n}`} className={`cook-step${done ? " done" : n === current ? " current" : ""}`}>
+                      <span className="step-box" aria-hidden="true">{n + 1}</span>
+                      <div className="step-text">
+                        <span>{step}</span>
+                        {mins && !done && (
+                          <button type="button" className="timer-chip" onClick={() => startTimer(mins, n + 1)}>
+                            <Icon name="timer" size={16} /> Start {mins} min timer
+                          </button>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        className={`done-circle${done ? " on" : ""}`}
+                        aria-pressed={done}
+                        aria-label={done ? `Step ${n + 1} done. Tap to undo` : `Mark step ${n + 1} done`}
+                        onClick={() => toggleStep(n)}
+                      >
+                        <Icon name="check" size={22} stroke={3} />
+                        {!done && <span>Done</span>}
+                      </button>
+                    </li>
+                  );
+                })}
               </ol>
             ) : (
               <ol className="plain-steps">
@@ -330,12 +470,6 @@ export default function RecipePage() {
             <p style={{ margin: 0, whiteSpace: "pre-line" }}>{r.notes}</p>
           </section>
         )}
-
-        {r.source_url && (
-          <a href={r.source_url} target="_blank" rel="noreferrer" className="btn btn-quiet small" style={{ alignSelf: "flex-start" }}>
-            <Icon name="external" size={18} /> {new URL(r.source_url).hostname.replace(/^www\./, "")}
-          </a>
-        )}
       </main>
 
       {toast && (
@@ -349,6 +483,18 @@ export default function RecipePage() {
             </button>
           )}
         </div>
+      )}
+
+      {celebrate && (
+        <Celebration
+          title={r.title.toLowerCase()}
+          stats={celebrate.stats}
+          onDone={() => {
+            setCelebrate(null);
+            saveCooking(null);
+            saveTimer(null);
+          }}
+        />
       )}
     </Screen>
   );

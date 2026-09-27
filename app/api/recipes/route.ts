@@ -4,9 +4,10 @@ import { requireHousehold } from "@/lib/context";
 import { dbError, handle, HttpError, ok, readJson } from "@/lib/http";
 import { signPhotos } from "@/lib/photos";
 import { RecipeInput } from "@/lib/recipe-schema";
+import { setRecipeTags } from "@/lib/tags";
 
 const LIST_COLUMNS =
-  "id,title,description,servings,total_minutes,baby_friendly,easy,quick,freezes_well,tags,image_url,photo_path,source_type,updated_at";
+  "id,title,description,servings,total_minutes,baby_friendly,easy,quick,freezes_well,image_url,photo_path,source_type,updated_at, recipe_tags(option_id)";
 
 const FLAG_COLUMNS: Record<string, string> = {
   baby: "baby_friendly",
@@ -43,13 +44,19 @@ export const GET = handle(async (request: Request) => {
 
   const signed = await signPhotos(supabase, data.map((r) => r.photo_path));
   return ok({
-    recipes: data.map((r) => ({ ...r, photo_url: r.photo_path ? (signed.get(r.photo_path) ?? null) : null })),
+    recipes: data.map(({ recipe_tags, ...r }) => ({
+      ...r,
+      tags: [],
+      tag_ids: ((recipe_tags ?? []) as { option_id: string }[]).map((t) => t.option_id),
+      photo_url: r.photo_path ? (signed.get(r.photo_path) ?? null) : null,
+    })),
   });
 });
 
 /** POST /api/recipes — manual entry, or saving a checked import draft. */
 export const POST = handle(async (request: Request) => {
-  const { supabase, householdId } = await requireHousehold();
+  const ctx = await requireHousehold();
+  const { supabase, householdId } = ctx;
   const parsed = RecipeInput.parse(await readJson(request));
   const recipe = parsed.recipe;
   const ingredients = await canonicalise(supabase, parsed.ingredients);
@@ -64,6 +71,7 @@ export const POST = handle(async (request: Request) => {
     p_ingredients: ingredients,
   });
   if (error) throw dbError(error);
+  await setRecipeTags(ctx, id as string, parsed.tagIds);
 
   return ok({ id, baby_warnings: babyCheck(ingredients) }, 201);
 });

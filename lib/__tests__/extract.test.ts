@@ -87,7 +87,7 @@ test("RecipeInput normalises manual entry", () => {
   assert.equal(recipe.title, "Fish pie");
   assert.equal(recipe.total_minutes, 60);
   assert.deepEqual(recipe.instructions, ["Boil the potatoes", "Mash", "Bake"]);
-  assert.deepEqual(recipe.tags, ["fish"]);
+  assert.deepEqual(recipe.tags, []); // tags now live in categories, not on the recipe row
   assert.equal(ingredients.length, 2);
   assert.equal(ingredients[1]?.quantity, 800);
   assert.throws(() => RecipeInput.parse({ title: "" }));

@@ -1,65 +1,78 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Spinner } from "@/components/bits";
 import { Icon } from "@/components/Icon";
 import { Screen } from "@/components/Screen";
 import { Sheet } from "@/components/Sheet";
 import { api } from "@/lib/client/api";
-import { writeCache } from "@/lib/client/cache";
-import type { KnownTag } from "@/lib/client/known";
+import { readCache, writeCache } from "@/lib/client/cache";
+import type { TagCategory } from "@/lib/client/types";
 
-export default function Tags() {
-  const [tags, setTags] = useState<KnownTag[] | null>(null);
-  const [editing, setEditing] = useState<string | null>(null);
+const STARTER: [string, string[]][] = [
+  ["Type", ["Western", "Asian"]],
+  ["Ingredients", ["Meat", "Seafood", "Vegetarian"]],
+];
+
+export default function TagCategories() {
+  const router = useRouter();
+  const [cats, setCats] = useState<TagCategory[] | null>(null);
+  const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
-  const load = () =>
-    api<{ tags: KnownTag[] }>("/api/tags")
-      .then((d) => {
-        setTags(d.tags);
-        writeCache("tags", d.tags);
-        writeCache("recipes", null);
-      })
-      .catch((e: Error) => setMessage(e.message));
+  const keep = (c: TagCategory[]) => {
+    setCats(c);
+    writeCache("categories", c);
+  };
+
   useEffect(() => {
-    void load();
+    const cached = readCache<TagCategory[]>("categories");
+    if (cached) setCats(cached);
+    api<{ categories: TagCategory[] }>("/api/tags")
+      .then((d) => keep(d.categories))
+      .catch((e: Error) => setMessage(e.message));
   }, []);
 
-  async function rename() {
-    if (!editing) return;
-    const to = name.trim().toLowerCase();
-    if (!to || to === editing) return setEditing(null);
-    const target = tags?.find((t) => t.tag === to);
-    if (target && !confirm(`“${to}” already exists. Merge “${editing}” into it?`)) return;
+  async function create() {
+    setBusy(true);
     try {
-      await api("/api/tags", { method: "PATCH", json: { from: editing, to } });
-      setMessage(target ? `Merged into “${to}”.` : `Renamed to “${to}”.`);
-      setEditing(null);
-      await load();
+      const res = await api<{ id: string; categories: TagCategory[] }>("/api/tags", { method: "POST", json: { name } });
+      keep(res.categories);
+      router.push(`/settings/tags/${res.id}`);
     } catch (e) {
       setMessage((e as Error).message);
+      setBusy(false);
     }
   }
 
-  async function remove(tag: string, count: number) {
-    if (!confirm(`Remove “${tag}” from ${count} recipe${count === 1 ? "" : "s"}? The recipes stay.`)) return;
+  async function starter() {
+    setBusy(true);
     try {
-      await api(`/api/tags?tag=${encodeURIComponent(tag)}`, { method: "DELETE" });
-      setEditing(null);
-      setMessage(`Removed “${tag}”.`);
-      await load();
+      let latest: TagCategory[] = cats ?? [];
+      for (const [cat, options] of STARTER) {
+        if (latest.some((c) => c.name.toLowerCase() === cat.toLowerCase())) continue;
+        const res = await api<{ id: string; categories: TagCategory[] }>("/api/tags", { method: "POST", json: { name: cat } });
+        latest = res.categories;
+        for (const o of options) {
+          latest = (await api<{ categories: TagCategory[] }>(`/api/tags/${res.id}/options`, { method: "POST", json: { name: o } })).categories;
+        }
+      }
+      keep(latest);
     } catch (e) {
       setMessage((e as Error).message);
+    } finally {
+      setBusy(false);
     }
   }
 
   return (
     <Screen
       title="Tags"
-      subtitle="Add tags on any recipe via Edit."
+      subtitle="Tap a category to change its options."
       right={
         <Link href="/settings" className="icon-btn" aria-label="Back to settings">
           <Icon name="back" />
@@ -67,61 +80,66 @@ export default function Tags() {
       }
     >
       <main className="screen-body">
-        {tags === null && !message && <Spinner label="Loading tags…" />}
-        {message && <p className="small" role="status">{message}</p>}
-        {tags?.length === 0 && (
-          <div className="card empty">
-            <h2>No tags yet</h2>
-            <p>Open a recipe → Edit → Tags to add your first one.</p>
+        {cats === null && !message && <Spinner label="Loading tags…" />}
+        {message && <p className="error" role="alert">{message}</p>}
+        {cats?.length === 0 && (
+          <div className="card stack">
+            <h2>Group your tags</h2>
+            <p style={{ margin: 0 }}>
+              A category holds options: <b>Type</b> (Western, Asian) or <b>Ingredients</b> (Meat, Seafood, Vegetarian). You pick options when you add or edit a
+              recipe, and filter by them on Recipes.
+            </p>
+            <button type="button" className="btn btn-secondary" onClick={starter} disabled={busy}>
+              {busy ? "Adding…" : "Start with Type and Ingredients"}
+            </button>
           </div>
         )}
-        {tags && tags.length > 0 && (
-          <ul className="card" style={{ listStyle: "none", margin: 0, padding: "4px 16px" }}>
-            {tags.map((t) => (
-              <li key={t.tag} style={{ borderBottom: "1px solid var(--soft)" }}>
-                <button
-                  type="button"
-                  className="item"
-                  style={{ padding: "10px 0" }}
-                  onClick={() => {
-                    setEditing(t.tag);
-                    setName(t.tag);
-                  }}
-                >
-                  <span className="name">
-                    <b>{t.tag}</b>
-                    <small>
-                      {t.count} recipe{t.count === 1 ? "" : "s"}
-                    </small>
+        {cats && cats.length > 0 && (
+          <section className="card" style={{ padding: "4px 16px" }}>
+            {cats.map((c) => (
+              <Link key={c.id} href={`/settings/tags/${c.id}`} className="link-row">
+                <span>
+                  <b>{c.name}</b>
+                  <br />
+                  <span className="small muted">
+                    {c.options.length ? c.options.map((o) => o.name).join(", ") : "No options yet"}
                   </span>
-                  <Icon name="pencil" size={18} />
-                </button>
-              </li>
+                </span>
+                <span style={{ transform: "rotate(180deg)", display: "flex", color: "var(--muted)" }} aria-hidden="true">
+                  <Icon name="back" />
+                </span>
+              </Link>
             ))}
-          </ul>
+          </section>
+        )}
+        {cats !== null && (
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => {
+              setName("");
+              setAdding(true);
+            }}
+          >
+            <Icon name="plus" /> New category
+          </button>
         )}
       </main>
-      {editing && (
-        <Sheet title={`Tag: ${editing}`} onClose={() => setEditing(null)}>
+      {adding && (
+        <Sheet title="New category" onClose={() => setAdding(false)}>
           <form
             className="stack"
             onSubmit={(e) => {
               e.preventDefault();
-              void rename();
+              if (name.trim()) void create();
             }}
           >
             <label className="field">
-              New name <span className="hint">Use the name of an existing tag to merge the two.</span>
-              <input className="input" value={name} onChange={(e) => setName(e.target.value)} autoComplete="off" list="tag-names" />
-              <datalist id="tag-names">
-                {tags?.filter((t) => t.tag !== editing).map((t) => <option key={t.tag} value={t.tag} />)}
-              </datalist>
+              Name <span className="hint">e.g. Type, Ingredients, Meal, Cuisine</span>
+              <input className="input" value={name} onChange={(e) => setName(e.target.value)} autoComplete="off" enterKeyHint="done" />
             </label>
-            <button type="submit" className="btn btn-primary btn-block" disabled={!name.trim() || name.trim().toLowerCase() === editing}>
-              {tags?.some((t) => t.tag === name.trim().toLowerCase() && t.tag !== editing) ? "Merge" : "Rename"}
-            </button>
-            <button type="button" className="btn btn-danger btn-block" onClick={() => remove(editing, tags?.find((t) => t.tag === editing)?.count ?? 0)}>
-              <Icon name="trash" size={18} /> Delete tag
+            <button type="submit" className="btn btn-primary btn-block" disabled={!name.trim() || busy}>
+              {busy ? "Creating…" : "Create and add options"}
             </button>
           </form>
         </Sheet>

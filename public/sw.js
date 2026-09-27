@@ -1,6 +1,6 @@
 // Panda Chef offline helper. Keeps the last copy of pages, recipes and the shopping list so the
 // app opens in a shop with no signal. Always tries the network first when there is one.
-const VERSION = "pc-v3";
+const VERSION = "pc-v4";
 const STATIC = `${VERSION}-static`;
 const PAGES = `${VERSION}-pages`;
 const DATA = `${VERSION}-data`;

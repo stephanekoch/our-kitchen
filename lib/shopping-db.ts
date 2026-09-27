@@ -41,7 +41,6 @@ export async function loadActiveList({ supabase, householdId }: Ctx) {
     }))
     .sort(
       (a, b) =>
-        Number(a.checked) - Number(b.checked) ||
         categoryRank(a.category) - categoryRank(b.category) ||
         a.name.localeCompare(b.name, "en-GB"),
     );
