@@ -34,7 +34,7 @@ export function toDraft(
       baby_friendly: false,
       easy: flags.easy,
       freezes_well: r.freezes_well ?? false,
-      tags: r.tags,
+      tags: [], // tags are only ever added by you, in the app
       notes: null,
     },
     suggestions: {

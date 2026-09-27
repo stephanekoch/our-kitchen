@@ -15,7 +15,7 @@ database, sign-in and photo storage, Claude for reading recipes from links and p
 | `app/api/shopping-lists` | Active list; add recipes (scaled, merged, sorted by aisle) |
 | `app/api/shopping-lists/[id]/items` | Add your own item, clear ticked; tick/edit/delete one item |
 | `app/api/household` | Household, members, invites |
-| `app/api/auth/*`, `app/auth/callback` | Email code sign-in (link as a desktop fallback), family emails only |
+| `app/api/auth/*` | Email + password sign-in, family emails only (accounts made in Supabase) |
 | `app/manifest.ts`, `public/icons/` | Home-screen install: name, full-screen mode, icons |
 | `lib/app-config.ts` | App name and colours: change the name here |
 | `lib/` | Ingredient parser, aisle categories, baby check, list builder, page reader |
@@ -32,19 +32,9 @@ Imports return a **draft**; nothing is saved until the app POSTs it to `/api/rec
    supabase link --project-ref YOUR-PROJECT-REF
    supabase db push
    ```
-3. Authentication → URL Configuration: set **Site URL** to your Vercel URL and add
-   `https://YOUR-APP.vercel.app/auth/callback` (and `http://localhost:3000/auth/callback`) to **Redirect URLs**.
-4. **Sign-in email (required).** The app signs in with a 6-digit code, not a link, because an iPhone
-   home-screen app keeps its own cookies: a link would open Safari and sign Safari in, not the app.
-   In Authentication → Email Templates, edit both **Magic Link** and **Confirm signup** so the body is:
-   ```html
-   <h2>Your Our Kitchen code</h2>
-   <p style="font-size:28px;letter-spacing:4px"><strong>{{ .Token }}</strong></p>
-   <p>Or, on a computer: <a href="{{ .SiteURL }}/auth/callback?token_hash={{ .TokenHash }}&type=email">sign in with this link</a></p>
-   ```
-5. **Email sender.** Supabase's built-in sender is for testing: it's heavily rate-limited and may only deliver
-   to members of your Supabase organisation. Set up a free sender (e.g. Resend) under
-   Authentication → Emails → SMTP Settings before your partner signs in.
+3. **Accounts (no emails needed).** Authentication → Sign In / Providers: turn **off** "Allow new users to sign up"
+   and "Confirm email". Then Authentication → Users → **Add user** → **Create new user** for each of you:
+   email, password, tick **Auto Confirm User**. Use the same emails as `ALLOWED_EMAILS` in Vercel.
 
 **2. GitHub and Vercel**
 1. Push this folder to a new private GitHub repo.
@@ -56,16 +46,17 @@ Imports return a **draft**; nothing is saved until the app POSTs it to `/api/rec
 **3. Put it on your phones**
 - **iPhone:** open the site in Safari → Share → **Add to Home Screen**. It opens full screen with the icon and name.
 - **Pixel:** open the site in Chrome → ⋮ menu → **Add to home screen** → **Install**. It installs like an app (also in the app drawer).
-- Sign in inside the installed app (email → code). You stay signed in; there's no need to repeat it.
+- Sign in inside the installed app (email and password; iPhone and Android offer to save it). You stay signed in; there's no need to repeat it.
 
 **4. Sign in, in this order**
 1. You sign in first; that creates the household.
-2. Invite your partner: `POST /api/household/invites {"email": "…"}` (the app will have a button for this).
-3. Your partner signs in and lands in the same household. If they signed in before the invite, they
-   just sign in again: an empty household of their own is swapped for yours automatically.
-4. Once you're both in, turn off Authentication → Providers → Email → **Allow new users to sign up**.
-   Existing accounts keep working. (The API already refuses anyone not in `ALLOWED_EMAILS`;
-   this also stops strangers creating empty accounts in your Supabase project.)
+2. Invite your partner. In Supabase → SQL Editor, run (with their email):
+   `insert into household_invites (email, household_id) select 'partner@example.com', household_id from household_members limit 1;`
+3. Your partner signs in and lands in your household. If they signed in before the invite, they sign out and in
+   again: their empty household is swapped for yours automatically.
+
+**Forgotten password?** Supabase → SQL Editor:
+`update auth.users set encrypted_password = crypt('new-password', gen_salt('bf')) where email = 'you@example.com';`
 
 ## Develop
 

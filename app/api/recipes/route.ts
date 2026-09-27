@@ -1,4 +1,5 @@
 import { babyCheck } from "@/lib/baby-check";
+import { canonicalise } from "@/lib/canonical";
 import { requireHousehold } from "@/lib/context";
 import { dbError, handle, HttpError, ok, readJson } from "@/lib/http";
 import { signPhotos } from "@/lib/photos";
@@ -49,7 +50,9 @@ export const GET = handle(async (request: Request) => {
 /** POST /api/recipes — manual entry, or saving a checked import draft. */
 export const POST = handle(async (request: Request) => {
   const { supabase, householdId } = await requireHousehold();
-  const { recipe, ingredients } = RecipeInput.parse(await readJson(request));
+  const parsed = RecipeInput.parse(await readJson(request));
+  const recipe = parsed.recipe;
+  const ingredients = await canonicalise(supabase, parsed.ingredients);
 
   if (recipe.photo_path && !recipe.photo_path.startsWith(`${householdId}/`)) {
     throw new HttpError(400, "That photo doesn't belong to your household");

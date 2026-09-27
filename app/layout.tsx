@@ -1,6 +1,8 @@
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
+import { SwRegister } from "@/components/SwRegister";
 import { APP } from "@/lib/app-config";
+import "./globals.css";
 
 export const metadata: Metadata = {
   title: APP.name,
@@ -28,7 +30,19 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en-GB">
-      <body style={{ fontFamily: "system-ui, sans-serif", margin: 0, background: APP.background }}>{children}</body>
+      <head>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
+        {/* eslint-disable-next-line @next/next/no-page-custom-font */}
+        <link
+          rel="stylesheet"
+          href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Next:wght@400;700&family=Fraunces:opsz,wght@9..144,600&display=swap"
+        />
+      </head>
+      <body>
+        {children}
+        <SwRegister />
+      </body>
     </html>
   );
 }

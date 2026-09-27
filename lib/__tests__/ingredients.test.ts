@@ -85,3 +85,13 @@ test("normalizeIngredients accepts text, lines and objects", () => {
     ],
   );
 });
+
+test("nameKey treats US and UK names as the same thing", () => {
+  assert.equal(nameKey("scallions"), nameKey("spring onions"));
+  assert.equal(nameKey("2 zucchini".replace(/^2 /, "")), "courgette");
+  assert.equal(nameKey("fresh cilantro"), "coriander");
+  assert.equal(nameKey("red bell peppers"), "red pepper");
+  assert.equal(nameKey("ground beef"), "beef mince");
+  assert.equal(nameKey("heavy cream"), "double cream");
+  assert.equal(nameKey("all-purpose flour"), "plain flour");
+});

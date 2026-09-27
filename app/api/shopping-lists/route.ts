@@ -13,8 +13,8 @@ export const GET = handle(async () => {
 const Body = z.object({
   recipes: z
     .array(z.object({ id: z.uuid(), servings: z.number().int().min(1).max(50).nullish() }))
-    .min(1, "Pick at least one recipe")
-    .max(30),
+    .max(30)
+    .default([]), // empty: just make sure there's an active list (for typing items in)
   mode: z.enum(["append", "replace"]).default("append"),
   title: z.string().trim().min(1).max(80).nullish(),
 });
@@ -29,7 +29,7 @@ export const POST = handle(async (request: Request) => {
   const body = Body.parse(await readJson(request));
   const ids = [...new Set(body.recipes.map((r) => r.id))];
 
-  const { data, error } = await ctx.supabase
+  const { data, error } = ids.length === 0 ? { data: [], error: null } : await ctx.supabase
     .from("recipes")
     .select("id,title,servings, recipe_ingredients(name,quantity,unit,category)")
     .eq("household_id", ctx.householdId)

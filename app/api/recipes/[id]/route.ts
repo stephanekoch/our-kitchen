@@ -1,4 +1,5 @@
 import { babyCheck } from "@/lib/baby-check";
+import { canonicalise } from "@/lib/canonical";
 import { requireHousehold, type Ctx } from "@/lib/context";
 import { dbError, handle, HttpError, ok, readJson } from "@/lib/http";
 import { removePhoto, signPhotos } from "@/lib/photos";
@@ -56,11 +57,13 @@ export const PATCH = handle(async (request: Request, { params }: Params) => {
   if (!body || typeof body !== "object" || Array.isArray(body)) throw new HttpError(400, "Send an object of fields to change");
 
   const existing = await loadRecipe(ctx, id);
-  const { recipe, ingredients } = RecipeInput.parse({
+  const parsed = RecipeInput.parse({
     ...rowToInput(existing),
     ...(body as Record<string, unknown>),
     source_type: existing.source_type, // where a recipe came from doesn't change
   });
+  const recipe = parsed.recipe;
+  const ingredients = await canonicalise(ctx.supabase, parsed.ingredients);
 
   if (recipe.photo_path && !recipe.photo_path.startsWith(`${ctx.householdId}/`)) {
     throw new HttpError(400, "That photo doesn't belong to your household");

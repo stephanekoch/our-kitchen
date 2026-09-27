@@ -254,8 +254,39 @@ export function nameKey(name: string): string {
   if (!words.length) return name.toLowerCase().trim();
   const last = words.length - 1;
   words[last] = singularise(words[last]!);
-  return words.join(" ");
+  let key = words.join(" ");
+  for (const [re, to] of SYNONYMS) key = key.replace(re, to);
+  return key;
 }
+
+// Different names for the same thing you buy (mostly US recipe names → UK shop names).
+const SYNONYMS: [RegExp, string][] = [
+  [/\b(scallion|green onion|salad onion)\b/, "spring onion"],
+  [/\bzucchini\b/, "courgette"],
+  [/\bcilantro\b/, "coriander"],
+  [/\beggplant\b/, "aubergine"],
+  [/\barugula\b/, "rocket"],
+  [/\bbell pepper\b/, "pepper"],
+  [/\bcapsicum\b/, "pepper"],
+  [/\bgarbanzo beans\b/, "chickpeas"],
+  [/\b(ground beef|minced beef)\b/, "beef mince"],
+  [/\b(ground pork|minced pork)\b/, "pork mince"],
+  [/\b(ground turkey|minced turkey)\b/, "turkey mince"],
+  [/\b(ground lamb|minced lamb)\b/, "lamb mince"],
+  [/\bheavy cream\b/, "double cream"],
+  [/\blight cream\b/, "single cream"],
+  [/\b(powdered sugar|confectioners sugar|confectioner sugar)\b/, "icing sugar"],
+  [/\bsuperfine sugar\b/, "caster sugar"],
+  [/\bcornstarch\b/, "cornflour"],
+  [/\bshrimp\b/, "prawn"],
+  [/\brutabaga\b/, "swede"],
+  [/\b(baking soda|bicarbonate of soda|bicarb)\b/, "bicarbonate of soda"],
+  [/\ball[- ]purpose flour\b/, "plain flour"],
+  [/\bself[- ]rising flour\b/, "self-raising flour"],
+  [/\bsnow pea\b/, "mangetout"],
+  [/\bbeet\b/, "beetroot"],
+  [/\bchili\b/, "chilli"],
+];
 
 export function formatNumber(n: number): string {
   return Number.isInteger(n) ? String(n) : String(Math.round(n * 100) / 100);
