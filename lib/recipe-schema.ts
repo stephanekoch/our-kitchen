@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { CATEGORIES } from "./categories";
 import { normalizeIngredients, type Ingredient } from "./ingredients";
+import { ingredientToMetric, textToMetric } from "./metric";
 
 const minutes = z.number().int().min(0).max(1440).nullish();
 
@@ -46,13 +47,14 @@ export const RecipeInput = z
     photo_path: z.string().max(300).nullish(),
     baby_friendly: z.boolean().default(false),
     easy: z.boolean().default(false),
+    quick: z.boolean().default(false),
     freezes_well: z.boolean().default(false),
     tags: z.array(z.string().trim().min(1).max(40)).max(20).default([]),
     notes: z.string().trim().max(5000).nullish(),
   })
   .transform((r) => {
-    const ingredients: Ingredient[] = normalizeIngredients(r.ingredients);
-    const instructions = splitSteps(r.instructions);
+    const ingredients: Ingredient[] = normalizeIngredients(r.ingredients).map(ingredientToMetric);
+    const instructions = splitSteps(r.instructions).map(textToMetric);
     const total =
       r.total_minutes ??
       (r.prep_minutes != null || r.cook_minutes != null ? (r.prep_minutes ?? 0) + (r.cook_minutes ?? 0) : null);
@@ -70,6 +72,7 @@ export const RecipeInput = z
       photo_path: r.photo_path ?? null,
       baby_friendly: r.baby_friendly,
       easy: r.easy,
+      quick: r.quick,
       freezes_well: r.freezes_well,
       tags: [...new Set(r.tags.map((t) => t.toLowerCase()))],
       notes: r.notes || null,
@@ -93,7 +96,6 @@ export type RecipeRow = Omit<RecipeRecord, "source_type"> & {
   id: string;
   household_id: string;
   source_type: "manual" | "url" | "photo";
-  quick: boolean;
   created_at: string;
   updated_at: string;
   recipe_ingredients?: IngredientRow[];
@@ -101,7 +103,7 @@ export type RecipeRow = Omit<RecipeRecord, "source_type"> & {
 
 /** For PATCH: the stored recipe in the same shape RecipeInput accepts. */
 export function rowToInput(row: RecipeRow): Record<string, unknown> {
-  const { id, household_id, quick, created_at, updated_at, recipe_ingredients, ...rest } = row;
+  const { id, household_id, created_at, updated_at, recipe_ingredients, ...rest } = row;
   return {
     ...rest,
     ingredients: (recipe_ingredients ?? [])

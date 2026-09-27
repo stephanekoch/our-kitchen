@@ -15,6 +15,7 @@ type ItemRow = {
   checked: boolean;
   checked_at: string | null;
   checked_by: string | null;
+  cleared?: boolean;
   created_at: string;
 };
 
@@ -32,6 +33,7 @@ export async function loadActiveList({ supabase, householdId }: Ctx) {
   if (!data) return null;
 
   const items = ((data.shopping_list_items ?? []) as ItemRow[])
+    .filter((i) => !i.cleared)
     .map((i) => ({
       ...i,
       quantity: i.quantity == null ? null : Number(i.quantity),

@@ -35,6 +35,8 @@ export const PATCH = handle(async (request: Request, { params }: Params) => {
 
   const update: Record<string, unknown> = { ...body };
   if (body.name !== undefined) update.name_key = nameKey(body.name);
+  // Changing the name or amount makes it your own line, so recipe changes won't overwrite it.
+  if (body.name !== undefined || body.quantity !== undefined || body.unit !== undefined) update.is_manual = true;
   if (body.checked !== undefined) {
     update.checked_at = body.checked ? new Date().toISOString() : null;
     update.checked_by = body.checked ? ctx.userId : null;
@@ -52,19 +54,18 @@ export const PATCH = handle(async (request: Request, { params }: Params) => {
   return ok({ item: { ...data, amount: formatQuantity(data.quantity, data.unit) } });
 });
 
-/** DELETE /api/shopping-lists/:id/items/:itemId */
+/** DELETE /api/shopping-lists/:id/items/:itemId — your own items are deleted; recipe lines are hidden so they stay off. */
 export const DELETE = handle(async (_request: Request, { params }: Params) => {
   const ctx = await requireHousehold();
   const { id, itemId } = await ids(params);
   if (!(await assertList(ctx, id))) throw new HttpError(404, "List not found");
-  const { data, error } = await ctx.supabase
-    .from("shopping_list_items")
-    .delete()
-    .eq("id", itemId)
-    .eq("list_id", id)
-    .select("id")
-    .maybeSingle();
+  const { data: item, error } = await ctx.supabase
+    .from("shopping_list_items").select("id,is_manual").eq("id", itemId).eq("list_id", id).maybeSingle();
   if (error) throw dbError(error);
-  if (!data) throw new HttpError(404, "Item not found");
+  if (!item) throw new HttpError(404, "Item not found");
+  const { error: e2 } = item.is_manual
+    ? await ctx.supabase.from("shopping_list_items").delete().eq("id", itemId)
+    : await ctx.supabase.from("shopping_list_items").update({ cleared: true }).eq("id", itemId);
+  if (e2) throw dbError(e2);
   return new Response(null, { status: 204 });
 });

@@ -1,12 +1,12 @@
 "use client";
 
-import { useMemo, useState, type FormEvent } from "react";
-import { babyCheck } from "@/lib/baby-check";
-import { normalizeIngredients } from "@/lib/ingredients";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import { shrinkPhoto } from "@/lib/client/image";
 import { useKnown } from "@/lib/client/known";
 import type { Draft } from "@/lib/client/types";
-import { BabyPanel, Photo } from "./bits";
+import { Icon } from "./Icon";
 import { IngredientEditor } from "./IngredientEditor";
+import { Photo } from "./bits";
 import { TagEditor } from "./TagEditor";
 
 export const FORM_ID = "recipe-form";
@@ -20,11 +20,12 @@ type FormState = {
   notes: string;
   baby_friendly: boolean;
   easy: boolean;
+  quick: boolean;
   freezes_well: boolean;
   tags: string[];
 };
 
-function toState(d: Draft): FormState {
+function toState(d: Draft & { quick?: boolean }): FormState {
   return {
     title: d.title ?? "",
     servings: d.servings != null ? String(d.servings) : "",
@@ -34,6 +35,7 @@ function toState(d: Draft): FormState {
     notes: d.notes ?? "",
     baby_friendly: d.baby_friendly,
     easy: d.easy,
+    quick: d.quick ?? false,
     freezes_well: d.freezes_well,
     tags: d.tags ?? [],
   };
@@ -44,28 +46,53 @@ const toInt = (s: string) => {
   return Number.isFinite(n) && n >= 0 ? n : null;
 };
 
-/** The whole recipe on one screen, ready to check and save. The Save button lives in the page's dock. */
+const FLAGS = [
+  { key: "baby_friendly", label: "Baby-friendly" },
+  { key: "easy", label: "Easy" },
+  { key: "quick", label: "Quick" },
+  { key: "freezes_well", label: "Freezes well" },
+] as const;
+
+/**
+ * The whole recipe on one screen, ready to check and save. The Save button lives in the
+ * page's dock; a new photo is uploaded by the page after the recipe itself is saved.
+ */
 export function RecipeForm({
   initial,
   onSave,
 }: {
-  initial: Draft;
-  onSave: (body: Record<string, unknown>) => Promise<void>;
+  initial: Draft & { quick?: boolean };
+  onSave: (body: Record<string, unknown>, photo: Blob | null) => Promise<void>;
 }) {
   const [s, setS] = useState<FormState>(() => toState(initial));
   const [error, setError] = useState<string | null>(null);
+  const [servingsMissing, setServingsMissing] = useState(false);
+  const [photo, setPhoto] = useState<{ blob: Blob; url: string } | null>(null);
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const servingsInput = useRef<HTMLInputElement>(null);
   const known = useKnown();
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) => setS((prev) => ({ ...prev, [k]: v }));
-
-  const warnings = useMemo(() => {
-    try {
-      return babyCheck(normalizeIngredients(s.ingredients));
-    } catch {
-      return [];
-    }
-  }, [s.ingredients]);
-  const hasAvoid = warnings.some((w) => w.level === "avoid");
   const total = toInt(s.total);
+  const unknownServings = initial.source_type !== "manual" && initial.servings == null;
+
+  useEffect(() => () => {
+    if (photo) URL.revokeObjectURL(photo.url);
+  }, [photo]);
+
+  async function pickPhoto(file: File | undefined) {
+    if (!file) return;
+    setPhotoBusy(true);
+    try {
+      const blob = await shrinkPhoto(file);
+      setPhoto({ blob, url: URL.createObjectURL(blob) });
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setPhotoBusy(false);
+      if (fileInput.current) fileInput.current.value = "";
+    }
+  }
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -73,82 +100,101 @@ export function RecipeForm({
       setError("Give the recipe a name");
       return;
     }
-    setError(null);
     const servings = toInt(s.servings);
+    if (!servings || servings > 50) {
+      setServingsMissing(true);
+      setError("How many people does this recipe feed?");
+      servingsInput.current?.focus();
+      servingsInput.current?.scrollIntoView({ block: "center" });
+      return;
+    }
+    setError(null);
     try {
-      await onSave({
-        title: s.title.trim(),
-        description: initial.description,
-        servings: servings && servings > 0 && servings <= 50 ? servings : null,
-        // A total typed here wins; otherwise keep the prep/cook split that came with the recipe.
-        total_minutes: total,
-        prep_minutes: total === initial.total_minutes ? initial.prep_minutes : null,
-        cook_minutes: total === initial.total_minutes ? initial.cook_minutes : null,
-        ingredients: s.ingredients,
-        instructions: s.method,
-        source_type: initial.source_type,
-        source_url: initial.source_url,
-        image_url: initial.image_url,
-        photo_path: initial.photo_path,
-        baby_friendly: s.baby_friendly,
-        easy: s.easy,
-        freezes_well: s.freezes_well,
-        tags: s.tags,
-        notes: s.notes.trim() || null,
-      });
+      await onSave(
+        {
+          title: s.title.trim(),
+          description: initial.description,
+          servings,
+          // A total typed here wins; otherwise keep the prep/cook split that came with the recipe.
+          total_minutes: total,
+          prep_minutes: total === initial.total_minutes ? initial.prep_minutes : null,
+          cook_minutes: total === initial.total_minutes ? initial.cook_minutes : null,
+          ingredients: s.ingredients,
+          instructions: s.method,
+          source_type: initial.source_type,
+          source_url: initial.source_url,
+          image_url: initial.image_url,
+          photo_path: initial.photo_path,
+          baby_friendly: s.baby_friendly,
+          easy: s.easy,
+          quick: s.quick,
+          freezes_well: s.freezes_well,
+          tags: s.tags,
+          notes: s.notes.trim() || null,
+        },
+        photo?.blob ?? null,
+      );
     } catch (err) {
       setError((err as Error).message);
     }
   }
 
-  const photo = initial.photo_url ?? initial.image_url;
+  const shownPhoto = photo?.url ?? initial.photo_url ?? initial.image_url;
 
   return (
     <form id={FORM_ID} onSubmit={submit} className="stack" noValidate>
-      {photo && <Photo src={photo} className="hero" iconSize={60} />}
+      <div style={{ position: "relative" }}>
+        <Photo src={shownPhoto} className="hero form-hero" iconSize={56} />
+        <input ref={fileInput} type="file" accept="image/*" hidden onChange={(e) => pickPhoto(e.target.files?.[0])} />
+        <button type="button" className="btn change-photo" onClick={() => fileInput.current?.click()} disabled={photoBusy}>
+          <Icon name="camera" size={18} /> {photoBusy ? "Preparing…" : shownPhoto ? "Change photo" : "Add photo"}
+        </button>
+      </div>
 
       <div className="card stack">
         <label className="field">
           Name
           <input className="input" value={s.title} onChange={(e) => set("title", e.target.value)} placeholder="Fish pie" required />
         </label>
-        <div className="row">
+        <div className="row" style={{ alignItems: "flex-start" }}>
           <label className="field" style={{ flex: 1 }}>
             Serves
-            <input className="input" inputMode="numeric" value={s.servings} onChange={(e) => set("servings", e.target.value.replace(/\D/g, ""))} placeholder="4" />
+            <input
+              ref={servingsInput}
+              className={`input${servingsMissing || (unknownServings && !s.servings) ? " input-attention" : ""}`}
+              inputMode="numeric"
+              value={s.servings}
+              onChange={(e) => {
+                set("servings", e.target.value.replace(/\D/g, ""));
+                setServingsMissing(false);
+              }}
+              placeholder="How many?"
+              required
+            />
           </label>
           <label className="field" style={{ flex: 1 }}>
             Total time (min)
             <input className="input" inputMode="numeric" value={s.total} onChange={(e) => set("total", e.target.value.replace(/\D/g, ""))} placeholder="45" />
           </label>
         </div>
-      </div>
-
-      <div className="card stack">
-        <div className="field" role="group" aria-label="Flags">
-          Flags
-          <div className="chips wrap" style={{ flexWrap: "wrap" }}>
-            <button type="button" className="chip" aria-pressed={s.baby_friendly} onClick={() => set("baby_friendly", !s.baby_friendly)}>
-              Baby-friendly
-            </button>
-            <button type="button" className="chip" aria-pressed={s.easy} onClick={() => set("easy", !s.easy)}>
-              Easy
-            </button>
-            <button type="button" className="chip" aria-pressed={s.freezes_well} onClick={() => set("freezes_well", !s.freezes_well)}>
-              Freezes well
-            </button>
-          </div>
-          <span className="hint">{total !== null && total <= 30 ? "Tagged Quick automatically (30 min or less)." : "Quick is added automatically for 30 minutes or less."}</span>
-        </div>
-        {warnings.length > 0 && <BabyPanel warnings={warnings} babyFriendly={s.baby_friendly} />}
-        {s.baby_friendly && hasAvoid && (
-          <p className="hint" style={{ margin: 0 }}>
-            Tagged baby-friendly: fine if you leave those out of the baby&apos;s portion.
+        {unknownServings && !s.servings && (
+          <p className="hint" style={{ margin: 0, color: "var(--warn-fg)", fontWeight: 700 }}>
+            The recipe doesn&apos;t say how many it serves. How many people does it feed?
           </p>
         )}
       </div>
 
       <div className="card stack">
+        <div className="field" role="group" aria-label="Flags">
+          Flags
+          <div className="row wrap" style={{ gap: 8 }}>
+            {FLAGS.map((f) => (
+              <button key={f.key} type="button" className="chip" aria-pressed={s[f.key]} onClick={() => set(f.key, !s[f.key])}>
+                {f.label}
+              </button>
+            ))}
+          </div>
+        </div>
         <div className="field">
           Tags <span className="hint">Your own labels, e.g. weeknight, batch cook, Sunday lunch</span>
           <TagEditor value={s.tags} onChange={(t) => set("tags", t)} known={known.tags} />
@@ -164,7 +210,7 @@ export function RecipeForm({
 
       <div className="card stack">
         <label className="field">
-          Method <span className="hint">One step per line</span>
+          Method <span className="hint">One step per line. Each line becomes a step to tick off when cooking.</span>
           <textarea className="textarea" rows={Math.max(5, s.method.split("\n").length + 1)} value={s.method} onChange={(e) => set("method", e.target.value)} placeholder={"Rinse the lentils.\nSoften the onion and carrot…"} />
         </label>
         <label className="field">

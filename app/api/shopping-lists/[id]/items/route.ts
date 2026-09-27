@@ -5,6 +5,7 @@ import { dbError, handle, HttpError, ok, readJson } from "@/lib/http";
 import { nameKey, parseIngredientLine } from "@/lib/ingredients";
 import { uuid } from "@/lib/recipe-schema";
 import { assertList } from "@/lib/shopping-db";
+import { dropFinishedRecipes, syncList } from "@/lib/list-sync";
 import { formatQuantity } from "@/lib/shopping";
 
 type Params = { params: Promise<{ id: string }> };
@@ -47,23 +48,34 @@ export const POST = handle(async (request: Request, { params }: Params) => {
   return ok({ item: { ...data, amount: formatQuantity(data.quantity, data.unit) } }, 201);
 });
 
-/** DELETE /api/shopping-lists/:id/items?checked=true — clear ticked items (?all=true empties the list). */
+/**
+ * DELETE /api/shopping-lists/:id/items?checked=true — done shopping: clear ticked items.
+ * Recipe lines are hidden rather than deleted so they don't come back; recipes with
+ * nothing left to buy come off the list. ?all=true empties the list completely.
+ */
 export const DELETE = handle(async (request: Request, { params }: Params) => {
   const ctx = await requireHousehold();
   const id = await listId(params);
   if (!(await assertList(ctx, id))) throw new HttpError(404, "List not found");
   const search = new URL(request.url).searchParams;
 
-  let query = ctx.supabase.from("shopping_list_items").delete().eq("list_id", id);
   if (search.get("all") === "true") {
-    const { error: e } = await ctx.supabase.from("shopping_list_recipes").delete().eq("list_id", id);
-    if (e) throw dbError(e);
-  } else if (search.get("checked") === "true") {
-    query = query.eq("checked", true);
-  } else {
+    const { error: e1 } = await ctx.supabase.from("shopping_list_recipes").delete().eq("list_id", id);
+    if (e1) throw dbError(e1);
+    const { data, error: e2 } = await ctx.supabase.from("shopping_list_items").delete().eq("list_id", id).select("id");
+    if (e2) throw dbError(e2);
+    return ok({ removed: data.length });
+  }
+  if (search.get("checked") !== "true") {
     throw new HttpError(400, "Add ?checked=true to clear ticked items, or ?all=true to empty the list");
   }
-  const { data, error } = await query.select("id");
-  if (error) throw dbError(error);
-  return ok({ removed: data.length });
+  const { data: gone, error: e3 } = await ctx.supabase
+    .from("shopping_list_items").delete().eq("list_id", id).eq("checked", true).eq("is_manual", true).select("id");
+  if (e3) throw dbError(e3);
+  const { data: hidden, error: e4 } = await ctx.supabase
+    .from("shopping_list_items").update({ cleared: true }).eq("list_id", id).eq("checked", true).eq("is_manual", false).eq("cleared", false).select("id");
+  if (e4) throw dbError(e4);
+  await dropFinishedRecipes(ctx, id);
+  await syncList(ctx, id);
+  return ok({ removed: (gone?.length ?? 0) + (hidden?.length ?? 0) });
 });

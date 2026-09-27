@@ -7,7 +7,7 @@ export const GET = handle(async () => {
   const { supabase, householdId, userId, email } = await requireHousehold();
   const [household, members, invites] = await Promise.all([
     supabase.from("households").select("id,name,created_at").eq("id", householdId).single(),
-    supabase.from("household_members").select("user_id,role,joined_at").eq("household_id", householdId).order("joined_at"),
+    supabase.from("household_members").select("user_id,role,joined_at,email").eq("household_id", householdId).order("joined_at"),
     supabase.from("household_invites").select("email,created_at").eq("household_id", householdId).order("created_at"),
   ]);
   for (const r of [household, members, invites]) if (r.error) throw dbError(r.error);

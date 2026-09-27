@@ -53,6 +53,7 @@ export type Draft = {
   photo_url?: string | null;
   baby_friendly: boolean;
   easy: boolean;
+  quick?: boolean;
   freezes_well: boolean;
   tags: string[];
   notes: string | null;

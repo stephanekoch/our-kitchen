@@ -1,6 +1,7 @@
 import { suggestFlags } from "./baby-check";
 import type { ExtractedRecipe } from "./extract/jsonld";
 import { normalizeIngredients } from "./ingredients";
+import { ingredientToMetric, textToMetric } from "./metric";
 import { splitSteps } from "./recipe-schema";
 
 /**
@@ -11,8 +12,8 @@ export function toDraft(
   r: ExtractedRecipe & { freezes_well?: boolean | null },
   source: { source_type: "url" | "photo"; source_url?: string | null; photo_path?: string | null },
 ) {
-  const ingredients = normalizeIngredients(r.ingredients);
-  const instructions = splitSteps(r.instructions);
+  const ingredients = normalizeIngredients(r.ingredients).map(ingredientToMetric);
+  const instructions = splitSteps(r.instructions).map(textToMetric);
   const total =
     r.total_minutes ?? (r.prep_minutes !== null || r.cook_minutes !== null ? (r.prep_minutes ?? 0) + (r.cook_minutes ?? 0) : null);
   const flags = suggestFlags({ ingredients, instructions, total_minutes: total });
@@ -32,8 +33,10 @@ export function toDraft(
       image_url: r.image_url,
       photo_path: source.photo_path ?? null,
       baby_friendly: false,
-      easy: flags.easy,
-      freezes_well: r.freezes_well ?? false,
+      // Every flag and tag is yours to set: nothing is ticked for you.
+      easy: false,
+      quick: false,
+      freezes_well: false,
       tags: [], // tags are only ever added by you, in the app
       notes: null,
     },

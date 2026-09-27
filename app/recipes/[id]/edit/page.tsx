@@ -9,6 +9,7 @@ import { FORM_ID, RecipeForm } from "@/components/RecipeForm";
 import { Screen } from "@/components/Screen";
 import { api } from "@/lib/client/api";
 import { writeCache } from "@/lib/client/cache";
+import { uploadPhoto } from "@/lib/client/image";
 import type { Draft, Recipe } from "@/lib/client/types";
 
 export default function EditRecipe() {
@@ -24,10 +25,11 @@ export default function EditRecipe() {
       .catch((e: Error) => setError(e.message));
   }, [id]);
 
-  async function save(body: Record<string, unknown>) {
+  async function save(body: Record<string, unknown>, photo: Blob | null) {
     setSaving(true);
     try {
       await api(`/api/recipes/${id}`, { method: "PATCH", json: body });
+      if (photo) await uploadPhoto(id, photo);
       writeCache(`recipe:${id}`, null);
       router.replace(`/recipes/${id}`);
     } catch (e) {

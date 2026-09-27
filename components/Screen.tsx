@@ -11,14 +11,14 @@ export function TabBar() {
   return (
     <nav className="tabbar" aria-label="Main">
       <Link href="/" className="tab" aria-current={current("/")}>
-        <Icon name="book" size={24} />
+        <span className="tab-ic"><Icon name="book" size={24} /></span>
         Recipes
       </Link>
       <Link href="/add" className="fab" aria-label="Add a recipe" aria-current={current("/add")}>
         <Icon name="plus" size={28} stroke={2.6} />
       </Link>
       <Link href="/list" className="tab" aria-current={current("/list")}>
-        <Icon name="list" size={24} />
+        <span className="tab-ic"><Icon name="list" size={24} /></span>
         List
       </Link>
     </nav>

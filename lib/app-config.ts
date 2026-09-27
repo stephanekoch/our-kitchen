@@ -6,4 +6,6 @@ export const APP = {
   description: "Our family recipes and shopping list",
   theme: "#F5EFE6", // C2 oat: status-bar colour on Android, splash background
   background: "#F5EFE6",
+  // Recipes open showing amounts for this many people; change it per recipe with − / +.
+  defaultPortions: 1,
 } as const;

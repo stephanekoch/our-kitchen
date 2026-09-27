@@ -24,6 +24,8 @@ export default function ListPage() {
   const [editMode, setEditMode] = useState(false);
   const [editing, setEditing] = useState<ListItem | null>(null);
   const [editText, setEditText] = useState("");
+  const [portionEdits, setPortionEdits] = useState<Record<string, number>>({});
+  const portionTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const flushing = useRef(false);
   const pendingRef = useRef<Pending>({});
 
@@ -158,6 +160,42 @@ export default function ListPage() {
     }
   }
 
+  function changePortions(recipeId: string, current: number, delta: number) {
+    if (!list) return;
+    const next = Math.min(50, Math.max(1, (portionEdits[recipeId] ?? current) + delta));
+    setPortionEdits((p) => ({ ...p, [recipeId]: next }));
+    clearTimeout(portionTimers.current[recipeId]);
+    // Wait for the taps to stop before recalculating the list.
+    portionTimers.current[recipeId] = setTimeout(async () => {
+      try {
+        const res = await api<{ list: ShoppingList | null }>(`/api/shopping-lists/${list.id}/recipes/${recipeId}`, {
+          method: "PATCH",
+          json: { servings: next },
+        });
+        setList(res.list);
+        writeCache("list", res.list);
+      } catch (e) {
+        setMessage((e as Error).message);
+      } finally {
+        setPortionEdits((p) => {
+          const { [recipeId]: _, ...rest } = p;
+          return rest;
+        });
+      }
+    }, 600);
+  }
+
+  async function removeRecipe(recipeId: string, title: string) {
+    if (!list || !confirm(`Take “${title}” off the list? Items only it needed are removed too.`)) return;
+    try {
+      const res = await api<{ list: ShoppingList | null }>(`/api/shopping-lists/${list.id}/recipes/${recipeId}`, { method: "DELETE" });
+      setList(res.list);
+      writeCache("list", res.list);
+    } catch (e) {
+      setMessage((e as Error).message);
+    }
+  }
+
   function openEdit(item: ListItem) {
     setEditing(item);
     setEditText(`${item.amount} ${item.name}`.trim());
@@ -255,10 +293,38 @@ export default function ListPage() {
             </Link>
           </div>
         )}
-        {list && list.recipes.length > 0 && items.length > 0 && (
-          <p className="small muted" style={{ margin: "0 4px" }}>
-            For: {list.recipes.map((r) => r.title).join(" · ")}
-          </p>
+        {list && list.recipes.length > 0 && (
+          <details className="card list-recipes">
+            <summary>
+              <span>
+                For: {list.recipes.map((r) => `${r.title} (${portionEdits[r.id] ?? r.servings ?? "?"})`).join(" · ")}
+              </span>
+              <span className="summary-action">Change</span>
+            </summary>
+            <ul>
+              {list.recipes.map((r) => {
+                const n = portionEdits[r.id] ?? r.servings ?? 1;
+                return (
+                  <li key={r.id}>
+                    <Link href={`/recipes/${r.id}`} className="list-recipe-title">{r.title}</Link>
+                    <div className="stepper">
+                      <button type="button" aria-label={`Fewer portions of ${r.title}`} disabled={n <= 1} onClick={() => changePortions(r.id, n, -1)}>
+                        <Icon name="minus" stroke={2.4} />
+                      </button>
+                      <span aria-live="polite" style={{ minWidth: 34 }}>{n}</span>
+                      <button type="button" aria-label={`More portions of ${r.title}`} disabled={n >= 50} onClick={() => changePortions(r.id, n, 1)}>
+                        <Icon name="plus" stroke={2.4} />
+                      </button>
+                    </div>
+                    <button type="button" className="icon-btn" style={{ background: "transparent" }} aria-label={`Remove ${r.title} from the list`} onClick={() => removeRecipe(r.id, r.title)}>
+                      <Icon name="trash" size={20} />
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+            <p className="small muted" style={{ margin: "6px 0 0" }}>Numbers are portions. Amounts on the list update to match.</p>
+          </details>
         )}
         {groups.map((g) => (
           <section key={g.category} className="aisle">

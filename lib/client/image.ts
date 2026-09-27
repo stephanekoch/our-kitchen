@@ -26,3 +26,11 @@ export async function shrinkPhoto(file: File, maxSide = 1600, quality = 0.82): P
     URL.revokeObjectURL(url);
   }
 }
+
+/** Replace a saved recipe's photo. */
+export async function uploadPhoto(recipeId: string, photo: Blob): Promise<void> {
+  const { api } = await import("./api");
+  const form = new FormData();
+  form.append("photo", photo, "photo.jpg");
+  await api(`/api/recipes/${recipeId}/photo`, { method: "POST", body: form });
+}

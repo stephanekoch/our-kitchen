@@ -30,9 +30,7 @@ export function useKnown() {
   return { ingredients, tags };
 }
 
-/** Recipes with something still to buy on the list (ticked-off items don't count). */
-export function recipesOnList(list: { groups: { items: { source_recipe_ids: string[] }[] }[] } | null | undefined): Set<string> {
-  const ids = new Set<string>();
-  for (const g of list?.groups ?? []) for (const i of g.items) for (const id of i.source_recipe_ids) ids.add(id);
-  return ids;
+/** Recipes on the shopping list, with the portions you're shopping for. */
+export function recipesOnList(list: { recipes: { id: string; servings: number | null }[] } | null | undefined): Map<string, number | null> {
+  return new Map((list?.recipes ?? []).map((r) => [r.id, r.servings]));
 }

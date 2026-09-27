@@ -97,3 +97,18 @@ test("RecipeInput normalises manual entry", () => {
 test("splitSteps", () => {
   assert.deepEqual(splitSteps(["1. One", "- Two", "  "]), ["One", "Two"]);
 });
+
+test("imports are converted to European units", async () => {
+  const { ingredientToMetric, textToMetric } = await import("../metric");
+  const { parseIngredientLine } = await import("../ingredients");
+  const m = (s: string) => ingredientToMetric(parseIngredientLine(s));
+  assert.deepEqual([m("2 cups milk").quantity, m("2 cups milk").unit], [480, "ml"]);
+  assert.equal(m("8 oz cheddar, grated").raw, "225 g cheddar, grated");
+  assert.equal(m("1 lb beef mince").raw, "455 g beef mince");
+  assert.equal(m("3 lb potatoes").raw, "1.36 kg potatoes");
+  assert.equal(m("1 stick butter").raw, "115 g butter");
+  assert.equal(m("200 g flour").raw, "200 g flour");
+  assert.equal(textToMetric("Bake at 400°F for 20 minutes"), "Bake at 200°C for 20 minutes");
+  assert.equal(textToMetric("Heat oven to 180C/350F."), "Heat oven to 180C.");
+  assert.equal(textToMetric("Use a 9-inch tin"), "Use a 23 cm tin");
+});

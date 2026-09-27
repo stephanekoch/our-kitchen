@@ -8,7 +8,7 @@ import { Icon } from "@/components/Icon";
 import { FORM_ID, RecipeForm } from "@/components/RecipeForm";
 import { Screen } from "@/components/Screen";
 import { api } from "@/lib/client/api";
-import { shrinkPhoto } from "@/lib/client/image";
+import { shrinkPhoto, uploadPhoto } from "@/lib/client/image";
 import type { Draft, ImportResult } from "@/lib/client/types";
 
 type Mode = "type" | "link" | "photo";
@@ -91,10 +91,11 @@ export default function AddRecipe() {
     }
   }
 
-  async function save(body: Record<string, unknown>) {
+  async function save(body: Record<string, unknown>, photo: Blob | null) {
     setSaving(true);
     try {
       const res = await api<{ id: string }>("/api/recipes", { method: "POST", json: body });
+      if (photo) await uploadPhoto(res.id, photo).catch(() => {}); // the recipe is saved either way
       router.replace(`/recipes/${res.id}`);
     } catch (e) {
       setSaving(false);

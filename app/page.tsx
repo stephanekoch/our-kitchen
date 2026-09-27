@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { FlagTags, Photo, Spinner } from "@/components/bits";
 import { Icon } from "@/components/Icon";
 import { Screen } from "@/components/Screen";
@@ -25,10 +25,12 @@ export default function Recipes() {
   const [error, setError] = useState<string | null>(null);
   const [on, setOn] = useState<Set<FilterId>>(new Set());
   const [q, setQ] = useState("");
+  const [searching, setSearching] = useState(false);
   const [matches, setMatches] = useState<Set<string> | null>(null);
   const [tags, setTags] = useState<Set<string>>(new Set());
   const [tagSheet, setTagSheet] = useState(false);
-  const [onList, setOnList] = useState<Set<string>>(new Set());
+  const [onList, setOnList] = useState<Map<string, number | null>>(new Map());
+  const searchInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const cached = readCache<RecipeSummary[]>("recipes");
@@ -47,6 +49,10 @@ export default function Recipes() {
       })
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (searching) searchInput.current?.focus();
+  }, [searching]);
 
   // Searching also looks inside ingredients, which only the server knows about.
   useEffect(() => {
@@ -99,27 +105,50 @@ export default function Recipes() {
           <Icon name="settings" />
         </Link>
       }
-      dockHeight={240}
+      dockHeight={150}
       dock={
-        <>
-          <div className="chips" role="group" aria-label="Filters">
+        searching ? (
+          <label className="search">
+            <Icon name="search" size={20} />
+            <span className="sr-only">Search recipes</span>
+            <input ref={searchInput} type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search recipes or ingredients" enterKeyHint="search" />
+            <button
+              type="button"
+              className="icon-btn"
+              style={{ width: 36, height: 36, background: "transparent" }}
+              aria-label="Close search"
+              onClick={() => {
+                setQ("");
+                setSearching(false);
+              }}
+            >
+              <Icon name="x" size={20} />
+            </button>
+          </label>
+        ) : (
+          <div className="filter-row" role="group" aria-label="Search and filters">
+            <button type="button" className="chip chip-icon" aria-label="Search" aria-pressed={!!q} onClick={() => setSearching(true)}>
+              <Icon name="search" size={20} />
+            </button>
             {FILTERS.map((f) => (
               <button key={f.id} type="button" className="chip" aria-pressed={on.has(f.id)} onClick={() => toggle(f.id)}>
                 {f.label}
               </button>
             ))}
             {allTags.length > 0 && (
-              <button type="button" className="chip" aria-pressed={tags.size > 0} aria-haspopup="dialog" onClick={() => setTagSheet(true)}>
-                {tags.size ? `Tags · ${tags.size}` : "Tags"}
+              <button
+                type="button"
+                className="chip chip-icon"
+                aria-pressed={tags.size > 0}
+                aria-haspopup="dialog"
+                aria-label={tags.size ? `Tags, ${tags.size} selected` : "Filter by tag"}
+                onClick={() => setTagSheet(true)}
+              >
+                <Icon name="tag" size={20} />
               </button>
             )}
           </div>
-          <label className="search">
-            <Icon name="search" size={20} />
-            <span className="sr-only">Search recipes</span>
-            <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search recipes or ingredients" enterKeyHint="search" />
-          </label>
-        </>
+        )
       }
     >
       <main className="screen-body">
@@ -140,23 +169,28 @@ export default function Recipes() {
             Nothing matches. Try fewer filters or a different word.
           </p>
         )}
-        {shown.map((r) => (
-          <Link key={r.id} href={`/recipes/${r.id}`} className="recipe-card">
-            <Photo src={r.photo_url ?? r.image_url} className="thumb" />
-            <div style={{ minWidth: 0 }}>
-              <h3>{r.title}</h3>
-              <div className="recipe-meta">
-                {r.total_minutes != null && <span>{duration(r.total_minutes)}</span>}
-                <FlagTags r={r} />
+        <div className="recipe-grid">
+          {shown.map((r) => (
+            <Link key={r.id} href={`/recipes/${r.id}`} className="recipe-tile">
+              <div className="tile-photo">
+                <Photo src={r.photo_url ?? r.image_url} className="thumb-fill" iconSize={40} />
                 {onList.has(r.id) && (
-                  <span className="tag tag-onlist">
-                    <Icon name="list" size={12} stroke={2.6} /> On the list
+                  <span className="tile-badge" title="On the shopping list">
+                    <Icon name="cart" size={16} stroke={2.4} />
+                    <span className="sr-only">On the shopping list</span>
                   </span>
                 )}
               </div>
-            </div>
-          </Link>
-        ))}
+              <div className="tile-body">
+                <h3>{r.title}</h3>
+                <div className="recipe-meta">
+                  {r.total_minutes != null && <span>{duration(r.total_minutes)}</span>}
+                  <FlagTags r={r} />
+                </div>
+              </div>
+            </Link>
+          ))}
+        </div>
       </main>
       {tagSheet && (
         <Sheet title="Filter by tag" onClose={() => setTagSheet(false)}>
