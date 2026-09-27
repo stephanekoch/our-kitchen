@@ -12,6 +12,7 @@ export type RecipeSummary = {
   freezes_well: boolean;
   tags: string[];
   tag_ids: string[];
+  search_text?: string | null;
   image_url: string | null;
   photo_url: string | null;
   source_type: "manual" | "url" | "photo";

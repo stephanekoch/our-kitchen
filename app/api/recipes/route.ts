@@ -7,7 +7,7 @@ import { RecipeInput } from "@/lib/recipe-schema";
 import { setRecipeTags } from "@/lib/tags";
 
 const LIST_COLUMNS =
-  "id,title,description,servings,total_minutes,baby_friendly,easy,quick,freezes_well,image_url,photo_path,source_type,updated_at, recipe_tags(option_id)";
+  "id,title,description,servings,total_minutes,baby_friendly,easy,quick,freezes_well,image_url,photo_path,source_type,updated_at,search_text, recipe_tags(option_id)";
 
 const FLAG_COLUMNS: Record<string, string> = {
   baby: "baby_friendly",

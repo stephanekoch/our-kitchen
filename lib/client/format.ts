@@ -31,11 +31,15 @@ export function amount(quantity: number | string | null, unit: string | null, fa
   if (quantity == null) return "";
   const v = Number(quantity) * factor;
   if (!Number.isFinite(v)) return "";
+  // Metric amounts are written joined up: 120ml, 1l, 250g, 1.5kg.
   if (unit === "g" || unit === "ml") {
-    if (v >= 1000) return `${Math.round(v / 100) / 10} ${unit === "g" ? "kg" : "l"}`;
-    return `${v >= 100 ? Math.round(v / 5) * 5 : Math.max(1, Math.round(v))} ${unit}`;
+    if (v >= 1000) return `${Math.round(v / 100) / 10}${unit === "g" ? "kg" : "l"}`;
+    return `${v >= 100 ? Math.round(v / 5) * 5 : Math.max(1, Math.round(v))}${unit}`;
   }
-  if (unit === "kg" || unit === "l") return `${Math.round(v * 100) / 100} ${unit}`;
+  if (unit === "kg" || unit === "l") {
+    if (v < 1) return `${Math.round((v * 1000) / 5) * 5}${unit === "kg" ? "g" : "ml"}`;
+    return `${Math.round(v * 100) / 100}${unit}`;
+  }
   if (unit === "fl_oz") return `${niceNumber(v)} fl oz`;
   const n = niceNumber(v);
   if (!unit) return n;

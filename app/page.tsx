@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { FlagTags, Photo, Spinner } from "@/components/bits";
 import { Icon } from "@/components/Icon";
 import { Screen } from "@/components/Screen";
+import { SearchOverlay } from "@/components/SearchOverlay";
 import { Sheet } from "@/components/Sheet";
 import { api } from "@/lib/client/api";
 import { readCache, writeCache } from "@/lib/client/cache";
@@ -24,14 +25,11 @@ export default function Recipes() {
   const [all, setAll] = useState<RecipeSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [on, setOn] = useState<Set<FilterId>>(new Set());
-  const [q, setQ] = useState("");
   const [searching, setSearching] = useState(false);
-  const [matches, setMatches] = useState<Set<string> | null>(null);
   const [picked, setPicked] = useState<Record<string, string[]>>({}); // category id → option ids
   const [sheet, setSheet] = useState<string | null>(null); // category id, or "flags"
   const { categories } = useKnown();
   const [onList, setOnList] = useState<Map<string, number | null>>(new Map());
-  const searchInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const cached = readCache<RecipeSummary[]>("recipes");
@@ -51,27 +49,6 @@ export default function Recipes() {
       .catch(() => {});
   }, []);
 
-  useEffect(() => {
-    if (searching) searchInput.current?.focus();
-  }, [searching]);
-
-  // Searching also looks inside ingredients, which only the server knows about.
-  useEffect(() => {
-    const term = q.trim();
-    if (!term) {
-      setMatches(null);
-      return;
-    }
-    const t = setTimeout(() => {
-      api<{ recipes: RecipeSummary[] }>(`/api/recipes?q=${encodeURIComponent(term)}`)
-        .then(({ recipes }) => setMatches(new Set(recipes.map((r) => r.id))))
-        .catch(() => {
-          const lower = term.toLowerCase();
-          setMatches(new Set((all ?? []).filter((r) => r.title.toLowerCase().includes(lower)).map((r) => r.id)));
-        });
-    }, 250);
-    return () => clearTimeout(t);
-  }, [q, all]);
 
   // Any option within a category; every category you've picked from must match.
   const shown = useMemo(
@@ -80,9 +57,9 @@ export default function Recipes() {
         (r) =>
           [...on].every((f) => r[f]) &&
           Object.values(picked).every((ids) => !ids.length || ids.some((id) => (r.tag_ids ?? []).includes(id))) &&
-          (!matches || matches.has(r.id)),
+          true,
       ),
-    [all, on, picked, matches],
+    [all, on, picked],
   );
   const pickedCount = Object.values(picked).reduce((n, ids) => n + ids.length, 0);
   const usedCategories = categories.filter((c) => c.options.length > 0);
@@ -101,7 +78,7 @@ export default function Recipes() {
       return next;
     });
 
-  const subtitle = all === null ? "" : on.size || pickedCount || q ? `${shown.length} of ${all.length} recipes` : `${all.length} recipes`;
+  const subtitle = all === null ? "" : on.size || pickedCount ? `${shown.length} of ${all.length} recipes` : `${all.length} recipes`;
 
   return (
     <Screen
@@ -114,27 +91,8 @@ export default function Recipes() {
       }
       dockHeight={150}
       dock={
-        searching ? (
-          <label className="search">
-            <Icon name="search" size={20} />
-            <span className="sr-only">Search recipes</span>
-            <input ref={searchInput} type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search recipes or ingredients" enterKeyHint="search" />
-            <button
-              type="button"
-              className="icon-btn"
-              style={{ width: 36, height: 36, background: "transparent" }}
-              aria-label="Close search"
-              onClick={() => {
-                setQ("");
-                setSearching(false);
-              }}
-            >
-              <Icon name="x" size={20} />
-            </button>
-          </label>
-        ) : (
           <div className="filter-row" role="group" aria-label="Search and filters">
-            <button type="button" className="chip chip-icon" aria-label="Search" aria-pressed={!!q} onClick={() => setSearching(true)}>
+            <button type="button" className="chip chip-icon" aria-label="Search recipes" onClick={() => setSearching(true)}>
               <Icon name="search" size={20} />
             </button>
             {usedCategories.map((c) => {
@@ -146,12 +104,7 @@ export default function Recipes() {
                 </button>
               );
             })}
-            <button type="button" className="chip chip-pill" aria-pressed={on.size > 0} aria-haspopup="dialog" onClick={() => setSheet("flags")}>
-              {on.size ? `Good for · ${on.size}` : "Good for"}
-              <Icon name="chevron" size={16} stroke={2.4} />
-            </button>
           </div>
-        )
       }
     >
       <main className="screen-body">
@@ -195,36 +148,29 @@ export default function Recipes() {
           ))}
         </div>
       </main>
-      {sheet && (
-        <Sheet title={sheetCategory ? sheetCategory.name : "Good for"} onClose={() => setSheet(null)}>
+      {sheetCategory && (
+        <Sheet title={sheetCategory.name} onClose={() => setSheet(null)}>
           <p className="small muted" style={{ margin: 0 }}>
-            {sheetCategory ? "Pick as many as you like: recipes matching any of them show." : "Recipes must have every one you pick."}
+            Pick as many as you like: recipes matching any of them show.
           </p>
           <div>
-            {sheetCategory
-              ? sheetCategory.options.map((o) => {
-                  const on_ = (picked[sheetCategory.id] ?? []).includes(o.id);
-                  return (
-                    <button key={o.id} type="button" className="optrow" aria-pressed={on_} onClick={() => toggleOption(sheetCategory.id, o.id)}>
-                      <span>
-                        {o.name} <small>{o.count}</small>
-                      </span>
-                      <span className="ck">{on_ && <Icon name="check" size={16} stroke={3} />}</span>
-                    </button>
-                  );
-                })
-              : FILTERS.map((f) => (
-                  <button key={f.id} type="button" className="optrow" aria-pressed={on.has(f.id)} onClick={() => toggle(f.id)}>
-                    <span>{f.long}</span>
-                    <span className="ck">{on.has(f.id) && <Icon name="check" size={16} stroke={3} />}</span>
-                  </button>
-                ))}
+            {sheetCategory.options.map((o) => {
+              const on_ = (picked[sheetCategory.id] ?? []).includes(o.id);
+              return (
+                <button key={o.id} type="button" className="optrow" aria-pressed={on_} onClick={() => toggleOption(sheetCategory.id, o.id)}>
+                  <span>
+                    {o.name} <small>{o.count}</small>
+                  </span>
+                  <span className="ck">{on_ && <Icon name="check" size={16} stroke={3} />}</span>
+                </button>
+              );
+            })}
           </div>
           <div className="spread">
             <button
               type="button"
               className="btn btn-quiet"
-              onClick={() => (sheetCategory ? setPicked((p) => ({ ...p, [sheetCategory.id]: [] })) : setOn(new Set()))}
+              onClick={() => setPicked((p) => ({ ...p, [sheetCategory.id]: [] }))}
             >
               Clear
             </button>
@@ -234,6 +180,7 @@ export default function Recipes() {
           </div>
         </Sheet>
       )}
+      {searching && all && <SearchOverlay recipes={all} onClose={() => setSearching(false)} />}
     </Screen>
   );
 }

@@ -29,7 +29,7 @@ export function ingredientToMetric(i: Ingredient): Ingredient {
   }
   quantity = roundMetric(quantity);
   if (quantity >= 1000) [quantity, unit] = [quantity / 1000, unit === "g" ? "kg" : "l"];
-  const raw = `${formatNumber(quantity)} ${unit} ${i.name}${i.note ? `, ${i.note}` : ""}`;
+  const raw = `${formatNumber(quantity)}${unit} ${i.name}${i.note ? `, ${i.note}` : ""}`;
   return { ...i, quantity, unit, raw };
 }
 

@@ -139,13 +139,15 @@ const UNIT_LABELS: Record<string, [string, string]> = {
   sheet: ["sheet", "sheets"],
 };
 
-/** "400 g", "1.2 kg", "3 tins", "2" — empty string when there's no quantity. */
+/** "400g", "1.2kg", "3 tins", "2" — empty string when there's no quantity. */
 export function formatQuantity(quantity: number | string | null, unit: string | null): string {
   if (quantity == null) return "";
   const q = Number(quantity);
   if (!Number.isFinite(q)) return "";
-  if (unit === "g") return q >= 1000 ? `${formatNumber(Math.round(q / 100) / 10)} kg` : `${formatNumber(q)} g`;
-  if (unit === "ml") return q >= 1000 ? `${formatNumber(Math.round(q / 100) / 10)} l` : `${formatNumber(q)} ml`;
+  // Metric amounts are written joined up: 120ml, 1l, 250g, 1.5kg.
+  if (unit === "g") return q >= 1000 ? `${formatNumber(Math.round(q / 100) / 10)}kg` : `${formatNumber(q)}g`;
+  if (unit === "ml") return q >= 1000 ? `${formatNumber(Math.round(q / 100) / 10)}l` : `${formatNumber(q)}ml`;
+  if (unit === "kg" || unit === "l") return `${formatNumber(q)}${unit}`;
   if (!unit) return formatNumber(q);
   const label = UNIT_LABELS[unit];
   if (label) return `${formatNumber(q)} ${q === 1 ? label[0] : label[1]}`;

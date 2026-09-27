@@ -54,6 +54,8 @@ const UNIT_PATTERN = [...UNIT_LOOKUP.keys()]
   .map((s) => s.replace(/[.]/g, "\\."))
   .join("|");
 
+const METRIC = new Set(["g", "kg", "ml", "l"]);
+
 export const CONTAINER_UNITS = new Set(["tin", "jar", "pack", "bag"]);
 export const WEIGHT_VOLUME_UNITS = new Set(["g", "kg", "ml", "l", "oz", "lb", "fl_oz", "pint"]);
 
@@ -324,7 +326,12 @@ export function normalizeIngredients(input: string | IngredientInput[]): Ingredi
     const category = CATEGORIES.includes(item.category as Category) ? (item.category as Category) : categorise(name);
     const raw =
       rawText ||
-      [item.quantity != null ? formatNumber(item.quantity) : "", unit ?? "", name, item.note ? `, ${item.note}` : ""]
+      [
+        item.quantity != null ? formatNumber(item.quantity) + (unit && METRIC.has(unit) ? unit : "") : "",
+        unit && !METRIC.has(unit) ? unit : "",
+        name,
+        item.note ? `, ${item.note}` : "",
+      ]
         .filter(Boolean)
         .join(" ")
         .replace(" ,", ",");

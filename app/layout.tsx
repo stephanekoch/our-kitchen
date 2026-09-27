@@ -26,6 +26,7 @@ export const viewport: Viewport = {
   initialScale: 1,
   viewportFit: "cover", // draw under the notch and home bar; screens pad with env(safe-area-inset-*)
   themeColor: APP.theme,
+  interactiveWidget: "resizes-content", // Android: the page shrinks above the keyboard instead of sliding under it
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

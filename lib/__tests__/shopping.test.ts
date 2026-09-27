@@ -37,10 +37,22 @@ test("merges, converts, scales and skips pantry basics", () => {
 });
 
 test("formatQuantity", () => {
-  assert.equal(formatQuantity(1500, "g"), "1.5 kg");
-  assert.equal(formatQuantity(400, "ml"), "400 ml");
+  assert.equal(formatQuantity(1500, "g"), "1.5kg");
+  assert.equal(formatQuantity(400, "ml"), "400ml");
+  assert.equal(formatQuantity(1000, "ml"), "1l");
+  assert.equal(formatQuantity(250, "g"), "250g");
   assert.equal(formatQuantity(3, "tin"), "3 tins");
   assert.equal(formatQuantity(1, "clove"), "1 clove");
   assert.equal(formatQuantity(2, null), "2");
   assert.equal(formatQuantity(null, null), "");
+});
+
+test("recipe amounts are written joined up", async () => {
+  const { amount } = await import("../client/format");
+  assert.equal(amount(120, "ml"), "120ml");
+  assert.equal(amount(1000, "ml"), "1l");
+  assert.equal(amount(250, "g"), "250g");
+  assert.equal(amount(0.5, "kg"), "500g");
+  assert.equal(amount(1.5, "kg"), "1.5kg");
+  assert.equal(amount(2, "tsp"), "2 tsp");
 });
