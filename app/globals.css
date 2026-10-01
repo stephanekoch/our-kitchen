@@ -464,3 +464,14 @@ input[type="search"]::-webkit-search-decoration { -webkit-appearance: none; appe
 .suggestion-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
 .suggestion-actions .btn { min-height: 46px; padding: 0 6px; font-size: 15px; gap: 4px; }
 .suggestion-added { margin: 0; display: flex; align-items: center; gap: 6px; color: var(--ok-fg); font-weight: 700; }
+
+/* Recipe cards: identical format. The photo is always a square crop; the text block is a fixed height. */
+.tile-photo { aspect-ratio: 1 / 1; overflow: hidden; min-height: 0; flex-shrink: 0; }
+.tile-photo .thumb-fill { position: absolute; inset: 0; width: 100%; height: 100%; }
+.tile-photo .thumb-fill img { width: 100%; height: 100%; object-fit: cover; object-position: center; }
+.tile-badge { z-index: 1; }
+.recipe-tile { height: 100%; }
+.tile-body { flex: 1; justify-content: space-between; }
+.tile-body h3 { min-height: calc(2 * 1.25em); }
+.tile-body .recipe-meta { flex-wrap: nowrap; overflow: hidden; white-space: nowrap; mask-image: linear-gradient(90deg, #000 85%, transparent); -webkit-mask-image: linear-gradient(90deg, #000 85%, transparent); }
+.tile-body .recipe-meta > * { flex-shrink: 0; }
