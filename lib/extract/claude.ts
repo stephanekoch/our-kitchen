@@ -3,10 +3,10 @@ import { z } from "zod";
 import { HttpError } from "../http";
 import type { ExtractedRecipe } from "./jsonld";
 
-const MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-5";
+export const MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-5";
 
 let client: Anthropic | null = null;
-function anthropic(): Anthropic {
+export function anthropic(): Anthropic {
   if (!process.env.ANTHROPIC_API_KEY) throw new HttpError(500, "ANTHROPIC_API_KEY is not set");
   client ??= new Anthropic({ maxRetries: 2, timeout: 55_000 });
   return client;

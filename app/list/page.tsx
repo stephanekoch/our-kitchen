@@ -7,6 +7,7 @@ import { Icon } from "@/components/Icon";
 import { Screen } from "@/components/Screen";
 import { Sheet } from "@/components/Sheet";
 import { useConfirm } from "@/components/Confirm";
+import { SuggestPanel } from "@/components/SuggestPanel";
 import { CATEGORY_LABELS, categorise, categoryRank, type Category } from "@/lib/categories";
 import { parseIngredientLine } from "@/lib/ingredients";
 import { api, ApiError } from "@/lib/client/api";
@@ -24,6 +25,7 @@ export default function ListPage() {
   const [message, setMessage] = useState<string | null>(null);
   const [editMode, setEditMode] = useState(false);
   const [mode, setModeState] = useState<"shop" | "plan">("shop");
+  const [suggesting, setSuggesting] = useState(false);
   const confirm = useConfirm();
   useEffect(() => {
     const m = readCache<"shop" | "plan">("listMode");
@@ -341,7 +343,7 @@ export default function ListPage() {
       <main className="screen-body" style={{ paddingTop: 8 }}>
         <div className="seg seg-2" role="tablist" aria-label="Shopping list view">
           <button type="button" role="tab" aria-selected={mode === "shop"} aria-pressed={mode === "shop"} onClick={() => setMode("shop")}>
-            Shop
+            Shopping list
           </button>
           <button type="button" role="tab" aria-selected={mode === "plan"} aria-pressed={mode === "plan"} onClick={() => setMode("plan")}>
             Plan
@@ -385,6 +387,19 @@ export default function ListPage() {
 
         {mode === "plan" && list !== undefined && (
           <>
+            <button type="button" className="card plan-suggest" onClick={() => setSuggesting(true)}>
+              <span className="plan-suggest-ic" aria-hidden="true">
+                <Icon name="sparkle" />
+              </span>
+              <span style={{ flex: 1, textAlign: "left" }}>
+                <b>Suggest recipes for the week</b>
+                <br />
+                <span className="small muted">Say what you fancy; Panda picks from your recipes.</span>
+              </span>
+              <span style={{ transform: "rotate(180deg)", display: "flex", color: "var(--muted)" }} aria-hidden="true">
+                <Icon name="back" />
+              </span>
+            </button>
             <section className="card">
               <h2>Cooking for</h2>
               {!list?.recipes.length ? (
@@ -436,6 +451,15 @@ export default function ListPage() {
           </>
         )}
       </main>
+      {suggesting && (
+        <SuggestPanel
+          onClose={() => setSuggesting(false)}
+          onAdded={(l) => {
+            setList(l);
+            writeCache("list", l);
+          }}
+        />
+      )}
       {editing && (
         <Sheet title="Change item" onClose={() => setEditing(null)}>
           <form
